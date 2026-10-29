@@ -1,0 +1,171 @@
+[한국어](README.md) | English
+
+# grok-cue
+
+grok-cue is a small, signed "reception desk" between two AI assistant services:
+[Cue](https://cue.im/), the personal-agent app by Manus, and
+[Grok Bot](https://docs.x.ai/grok-bot/overview), xAI's agents that work on their own cloud computers.
+The two assistants have no direct way to hand finished work to each other. grok-cue accepts a signed
+finished-work notice from the Cue side over HTTP and, if configured, forwards the accepted notice as JSON to a
+Grok Bot webhook.
+
+> Unofficial project. Not affiliated with or endorsed by Cue (Manus) or xAI's Grok Bot.
+
+> [!WARNING]
+> grok-cue is a development preview and is **accept-only**. HTTP `202` means "received", nothing more.
+> It never executes tasks, merges, deploys, pays, or sends mail; `executed` is always `false`.
+> Review [Security](#security) before exposing it to the internet.
+
+Setup guides: [docs/SETUP.en.md](docs/SETUP.en.md) (for people) and [docs/AI_SETUP.en.md](docs/AI_SETUP.en.md) (for agents).
+
+## What works
+
+- `POST /v1/cue/tasks` accepts a handoff notice with a Bearer token **and** an HMAC-SHA256 signature over `{timestamp}.{raw_body}`, with a ±300 s clock window.
+- Each authenticated signature is single-use; replaying it returns `401`.
+- Primary and secondary tokens and HMAC keys for zero-downtime key rotation.
+- Idempotency by `idempotency_key`: same bytes return the original `202`, different bytes return `409`.
+- Strict body validation (64 KiB limit, `application/json`, `github_ref` shape, no `task_id` anywhere).
+- `reply_to` limited to an env-configured allowlist of single email addresses.
+- Optional forwarding of a fixed set of 8 fields (`handoff_id`, `repo`, `github_ref`, `status`, `summary`, `links`, `next_owner`, `idempotency_key`; [spec](docs/DESIGN.en.md#spec)) to `GROK_WEBHOOK_URL` in the background, with a 5 s timeout.
+- Secrets (tokens, keys, signatures) and request bodies are kept out of logs.
+- `GET /healthz` for liveness.
+
+Idempotency and replay state live in process memory and are lost on restart.
+
+## How it works
+
+```
+ Cue side ──signed POST──▶ grok-cue ──accepted JSON (optional)──▶ Grok Bot webhook
+                              │
+                              └─ verify token + HMAC + time → validate → 202 / 4xx
+```
+
+Forwarding happens only when both `GROK_WEBHOOK_URL` and `GROK_WEBHOOK_KEY` are set, and only for the
+first acceptance of an idempotency key. A forwarding failure never changes the `202` already returned.
+
+## Install
+
+Have the following ready before installing; check each with the command shown.
+
+| Prerequisite | Check | Expected |
+| --- | --- | --- |
+| Git | `git --version` | A version is printed |
+| Python 3.11 or newer (`requires-python = ">=3.11"` in `pyproject.toml`) | `python3 --version` | `Python 3.11` or newer |
+| Caddy (server, for HTTPS) | `caddy version` | A version is printed |
+| Service account `bridge` (server) | `id bridge` | `uid=…(bridge)` |
+
+If the service account does not exist, create it on the server:
+
+```bash
+sudo useradd --system --no-create-home --shell /usr/sbin/nologin bridge
+id bridge
+```
+
+### Local
+
+```bash
+git clone <repository-url> grok-cue
+cd grok-cue
+python3 -m venv .venv
+source .venv/bin/activate
+pip install --require-hashes -r requirements.lock
+cp .env.example .env    # then replace every replace-with-... value
+pytest
+uvicorn app.main:app --host 127.0.0.1 --port 8160
+curl http://127.0.0.1:8160/healthz   # → ok
+```
+
+Generate secrets with `openssl rand -hex 32` (use different values for the token and the HMAC key).
+Never commit `.env`.
+
+### Server
+
+[docs/SETUP.en.md](docs/SETUP.en.md) covers installing to `/opt/grok-cue`, a `grok-cue.service` systemd
+unit, and putting a TLS reverse proxy such as Caddy in front (example host `hook.example.com`).
+Keep uvicorn bound to `127.0.0.1`.
+
+### Cue-side setup (unverified)
+
+We could **not confirm** from Cue's public materials that Cue can itself send a POST with Bearer and HMAC signature headers. The generic sender requirements are in [SETUP.en.md, Cue-side setup](docs/SETUP.en.md#cue-side-setup-unverified); the reference sender is [`scripts/check_bridge.py`](scripts/check_bridge.py).
+
+## Configuration
+
+All settings live in one `.env` file (or the same names as environment variables). Nothing is hard-coded.
+Restart the process after changes.
+
+| Variable | Required | Purpose |
+| --- | --- | --- |
+| `CUE_BRIDGE_TOKEN` | yes | Inbound `Authorization: Bearer` value |
+| `CUE_BRIDGE_HMAC_KEY` | yes | HMAC-SHA256 key; must differ from the token |
+| `CUE_BRIDGE_TOKEN_SECONDARY` | no | Second accepted token during rotation |
+| `CUE_BRIDGE_HMAC_KEY_SECONDARY` | no | Second accepted HMAC key during rotation |
+| `REPLY_TO_ALLOWLIST` | optional in code, **needed in practice** | Comma-separated allowed emails. Empty rejects every POST with `reply_to_not_allowed` |
+| `REPLY_TO_DEFAULT` | optional in code, **needed in practice** | Used when `reply_to` is omitted or blank; must be on the allowlist |
+| `GROK_WEBHOOK_URL` | no | Forward target. Empty disables forwarding |
+| `GROK_WEBHOOK_KEY` | no | Key sent to the forward target |
+| `GROK_WEBHOOK_KEY_HEADER` | no | Empty: `Authorization: Bearer <key>`. Set: send the bare key in this header |
+
+`PUBLIC_BASE_URL` (for example `https://hook.example.com`) is read only by docs and check scripts; the app ignores it.
+
+## API
+
+### Authentication
+
+Every `POST /v1/cue/tasks` needs all of:
+
+- `Authorization: Bearer <CUE_BRIDGE_TOKEN>`
+- `X-Cue-Timestamp`: Unix seconds, within ±300 s of server time
+- `X-Cue-Signature`: hex HMAC-SHA256 of `{timestamp}.{raw_body}` with `CUE_BRIDGE_HMAC_KEY`. Hex is case-insensitive; a `sha256=` prefix is rejected.
+
+To retry, keep the exact body bytes and compute a new timestamp and signature.
+
+```bash
+# Placeholders only. Run this check BEFORE enabling forwarding,
+# otherwise the fake handoff is really forwarded to Grok Bot.
+TOKEN='replace-with-bearer-token'; KEY='replace-with-hmac-key'
+TS="$(date +%s)"
+BODY='{"schema_version":"1","handoff_id":"00000000-0000-4000-8000-000000000000","repo":"owner/name","github_ref":{"repo":"owner/name","base_branch":"main","start_sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"idempotency_key":"example-key-1","title":"example","status":"completed","summary":"example summary","created_at":"2026-10-29T00:00:00Z","links":[],"next_owner":"example"}'
+SIG="$(printf '%s.%s' "$TS" "$BODY" | openssl dgst -sha256 -hmac "$KEY" -hex | awk '{print $NF}')"
+curl -sS -D - http://127.0.0.1:8160/v1/cue/tasks \
+  -H "Authorization: Bearer $TOKEN" -H "X-Cue-Timestamp: $TS" -H "X-Cue-Signature: $SIG" \
+  -H "Content-Type: application/json" --data-binary "$BODY"
+```
+
+Field reference: [docs/DESIGN.en.md](docs/DESIGN.en.md).
+
+### Idempotency
+
+Same `idempotency_key` + same bytes → the original `202` with `forwarded: false`; no second notify or forward.
+Same key + different bytes (even reordered JSON keys) → `409`. Requests rejected for `reply_to` do not reserve the key.
+
+### Responses
+
+| Code | Body | When |
+| --- | --- | --- |
+| 200 | `ok` | `GET /healthz` |
+| 202 | `handoff_id`, `status: "received"`, `executed: false`, `forwarded` | Accepted or idempotent replay |
+| 400 | `invalid_request` + `fields` | Size (over 64 KiB is rejected before auth), content type, JSON, schema |
+| 400 | `task_id_not_allowed` | A `task_id` key anywhere in the body |
+| 400 | `reply_to_not_allowed` + `allowed` | `reply_to` not usable |
+| 401 | `unauthorized` | Token, signature, time window, or reused signature |
+| 409 | `idempotency_conflict` | Same key, different body |
+| 500 | `internal` | Unhandled error |
+
+`forwarded: true` means a forward was scheduled, not that Grok Bot received or acted on it.
+`422` is never returned.
+
+## Security
+
+- Run behind TLS; bind the app to `127.0.0.1`.
+- Keep `.env` at mode `600` and out of version control. Never `source` it into a shell; the check script reads `.env` itself.
+- The 64 KiB body limit is checked before authentication. A large `Content-Length` is rejected immediately, and chunked bodies without a length stop being read as soon as they exceed 64 KiB.
+- The 401 response never says which check failed.
+- Report vulnerabilities as described in [SECURITY.en.md](SECURITY.en.md). Contributions: [CONTRIBUTING.en.md](CONTRIBUTING.en.md).
+
+## Dependencies
+
+Outbound HTTP uses [`httpx2`](https://github.com/pydantic/httpx2), the Pydantic-maintained successor to `httpx`. This is intentional; `pyproject.toml` pins it to `httpx2==2.16.0`, and `requirements.lock` locks every dependency with sha256 hashes (`pip-compile --generate-hashes --extra dev`).
+
+## License
+
+MIT License. Full text in [LICENSE](LICENSE). © grok-cue contributors
