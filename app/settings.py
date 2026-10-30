@@ -25,6 +25,8 @@ class Settings(BaseSettings):
     grok_webhook_url: str | None = None
     grok_webhook_key: str | None = None
     grok_webhook_key_header: str | None = None
+    # Empty means process memory only. A path is chosen by the operator; there is no built-in location.
+    cue_state_db: str | None = None
 
     @field_validator("cue_bridge_token", "cue_bridge_hmac_key")
     @classmethod
@@ -39,6 +41,7 @@ class Settings(BaseSettings):
         "grok_webhook_url",
         "grok_webhook_key",
         "grok_webhook_key_header",
+        "cue_state_db",
         "reply_to_default",
         mode="before",
     )

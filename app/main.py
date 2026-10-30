@@ -23,6 +23,7 @@ from app.auth import (
 from app.forward import GrokForwarder, handoff_payload
 from app.models import CueTaskRequest
 from app.notify import LogNotifier, Notifier
+from app.persistence import ReplaySeen, StateDB, StorageUnavailable
 from app.redact import SecretRedactingFilter
 from app.reply_to import ReplyToNotAllowed, resolve_reply_to
 from app.settings import Settings
@@ -38,10 +39,11 @@ _NO_STORE = {"Cache-Control": "no-store"}
 class AppState:
     settings: Settings
     clock: Callable[[], float]
-    store: IdempotencyStore
-    replay: ReplayCache
+    store: IdempotencyStore | StateDB
+    replay: ReplayCache | StateDB
     notifier: Notifier
     forwarder: GrokForwarder
+    durable: StateDB | None = None
 
 
 def _install_redaction(settings: Settings) -> None:
@@ -65,6 +67,11 @@ def json_error(status: int, code: str, **extra: object) -> JSONResponse:
 
 def unauthorized() -> JSONResponse:
     return json_error(401, "unauthorized")
+
+
+def storage_unavailable() -> JSONResponse:
+    logger.info("rejected error=storage_unavailable")
+    return json_error(503, "storage_unavailable")
 
 
 def invalid(fields: list[str]) -> JSONResponse:
@@ -113,6 +120,11 @@ def create_app(
 ) -> FastAPI:
     resolved = settings if settings is not None else Settings()
     _install_redaction(resolved)
+    durable: StateDB | None = None
+    if store is None and replay is None and resolved.cue_state_db:
+        durable = StateDB(resolved.cue_state_db)
+        store = durable
+        replay = durable
     state = AppState(
         settings=resolved,
         clock=clock or time.time,
@@ -120,6 +132,7 @@ def create_app(
         replay=replay or ReplayCache(),
         notifier=notifier or LogNotifier(),
         forwarder=forwarder or GrokForwarder(resolved),
+        durable=durable,
     )
     app = FastAPI(title="grok-cue", version="0.1.0", debug=False)
     app.state.bridge = state
@@ -185,21 +198,49 @@ def create_app(
             return unauthorized()
 
         # A fully authenticated signature is spent. Retries must re-sign.
-        if bridge.replay.seen_or_remember(signature.lower(), ts, now):
-            logger.info("auth failed reason=replay")
-            return unauthorized()
+        # Durable mode records that spend with the acceptance, in one commit,
+        # or on its own when the request is rejected after authentication.
+        signature_key = signature.lower()
+        if bridge.durable is None:
+            if bridge.replay.seen_or_remember(signature_key, ts, now):
+                logger.info("auth failed reason=replay")
+                return unauthorized()
+        else:
+            try:
+                if bridge.durable.seen(signature_key, now):
+                    logger.info("auth failed reason=replay")
+                    return unauthorized()
+            except StorageUnavailable:
+                return storage_unavailable()
+
+        def spend_replay() -> JSONResponse | None:
+            if bridge.durable is None:
+                return None
+            try:
+                bridge.durable.remember(signature_key, ts, now)
+            except StorageUnavailable:
+                return storage_unavailable()
+            return None
 
         content_type = request.headers.get("content-type", "")
         if not content_type.lower().startswith("application/json"):
+            if (blocked := spend_replay()) is not None:
+                return blocked
             return invalid(["content-type"])
         try:
             data = json.loads(raw)
         except json.JSONDecodeError:
+            if (blocked := spend_replay()) is not None:
+                return blocked
             return invalid(["body"])
         if not isinstance(data, dict):
+            if (blocked := spend_replay()) is not None:
+                return blocked
             return invalid(["body"])
         if json_has_key(data, "task_id"):
             logger.info("rejected error=task_id_not_allowed")
+            if (blocked := spend_replay()) is not None:
+                return blocked
             return json_error(400, "task_id_not_allowed")
 
         recipients = bridge.settings.reply_recipients()
@@ -209,17 +250,23 @@ def create_app(
                 resolve_reply_to(data["reply_to"], recipients, default_reply)
             except ReplyToNotAllowed:
                 logger.info("rejected error=reply_to_not_allowed")
+                if (blocked := spend_replay()) is not None:
+                    return blocked
                 return json_error(400, "reply_to_not_allowed", allowed=recipients)
 
         try:
             model = CueTaskRequest.model_validate(data)
         except ValidationError as exc:
+            if (blocked := spend_replay()) is not None:
+                return blocked
             return invalid(fields_from(exc))
 
         try:
             reply_to = resolve_reply_to(model.reply_to, recipients, default_reply)
         except ReplyToNotAllowed:
             logger.info("rejected error=reply_to_not_allowed")
+            if (blocked := spend_replay()) is not None:
+                return blocked
             return json_error(400, "reply_to_not_allowed", allowed=recipients)
 
         response_body: dict[str, object] = {
@@ -228,11 +275,26 @@ def create_app(
             "executed": False,
         }
         try:
-            result = bridge.store.register(
-                model.idempotency_key,
-                raw,
-                response_body,
-            )
+            if bridge.durable is not None:
+                result = bridge.durable.accept(
+                    signature_key,
+                    ts,
+                    now,
+                    model.idempotency_key,
+                    raw,
+                    response_body,
+                )
+            else:
+                result = bridge.store.register(
+                    model.idempotency_key,
+                    raw,
+                    response_body,
+                )
+        except ReplaySeen:
+            logger.info("auth failed reason=replay")
+            return unauthorized()
+        except StorageUnavailable:
+            return storage_unavailable()
         except IdempotencyConflict:
             logger.info("rejected error=idempotency_conflict")
             return json_error(409, "idempotency_conflict")

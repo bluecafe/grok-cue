@@ -76,6 +76,7 @@ def build_harness(
     grok_webhook_url: str | None = None,
     grok_webhook_key: str | None = None,
     grok_webhook_key_header: str | None = None,
+    state_db: str | None = None,
     forwarder: GrokForwarder | None = None,
     now: float = FIXED_NOW,
 ) -> Harness:
@@ -89,6 +90,7 @@ def build_harness(
         grok_webhook_url=grok_webhook_url,
         grok_webhook_key=grok_webhook_key,
         grok_webhook_key_header=grok_webhook_key_header,
+        cue_state_db=state_db,
     )
     notifier = RecordingNotifier()
     app = create_app(

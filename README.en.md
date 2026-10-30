@@ -2,7 +2,7 @@
 
 # grok-cue
 
-Current version: `0.0.2` ([VERSION](VERSION), [changelog](CHANGELOG.en.md))
+Current version: `0.0.3` ([VERSION](VERSION), [changelog](CHANGELOG.en.md))
 
 grok-cue is a small, signed "reception desk" between two AI assistant services:
 [Cue](https://cue.im/), the personal-agent app by Manus, and
