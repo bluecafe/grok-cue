@@ -40,7 +40,7 @@ Grok은 작업 메일을 보낸다. `GROK_WEBHOOK_URL`과 `GROK_WEBHOOK_KEY`가 
 - 루틴의 수신 주소가 `GROK_WEBHOOK_URL`이다.
 - `GROK_WEBHOOK_KEY_HEADER`가 비어 있으면 헤더는 `Authorization: Bearer <GROK_WEBHOOK_KEY>`다.
 - 헤더 이름을 적으면 그 헤더의 값으로 키만 온다. Bearer 접두사는 붙지 않는다.
-- 받는 키는 `handoff_id`, `repo`, `github_ref`, `status`, `summary`, `links`, `next_owner`, `idempotency_key`뿐이다. 스펙은 [DESIGN.md](DESIGN.md#스펙)다.
+- 받는 키는 `handoff_id`, `attempt`, `report_seq`, `repo`, `github_ref`, `status`, `summary`, `links`, `next_owner`, `idempotency_key`뿐이다. 스펙은 [DESIGN.md](DESIGN.md#스펙)다.
 - `schema_version`, `title`, `created_at`, `reply_to`, `requested_by`는 오지 않는다.
 - 제한 시간은 5초다. 백그라운드 POST가 실패하거나 Grok이 2xx가 아니어도, 이미 돌려준 `202`는 바뀌지 않는다.
 - Grok은 이 프로세스로 메일을 보내지 않는다. Bridge도 메일을 보내지 않는다.
@@ -65,7 +65,7 @@ HTTP `202`는 Bridge가 요청을 받아 검증하고 메모리에 기록했다�
 
 - `Authorization: Bearer <CUE_BRIDGE_TOKEN>`
 - `X-Cue-Timestamp`: Unix 초. 서버 시각과 ±300초
-- `X-Cue-Signature`: HMAC-SHA256 hex(대소문자 구분 없음). 입력은 `{timestamp}.{raw_body}`이다. `sha256=`은 붙이지 않는다
+- `X-Cue-Signature`: HMAC-SHA256 hex(대소문자 구분 없음). 버전 헤더가 없으면 입력은 `{timestamp}.{raw_body}`이다. `X-Cue-Signature-Version: 2`이면 `v2`, METHOD, PATH, timestamp, raw_body를 줄바꿈으로 잇는다. `sha256=`은 붙이지 않는다. 그 밖의 버전은 401이다. v1은 아직 받는다
 - `Content-Type: application/json`
 - 키는 `CUE_BRIDGE_HMAC_KEY`다. 교체 창이면 secondary도 받는다
 - Bearer와 HMAC가 둘 다 맞아야 한다
@@ -94,7 +94,7 @@ Bridge는 재시도, outbox, 영속 저장을 구현하지 않는다. 접수는 
 - `github_ref`의 `repo`, `base_branch`, `start_sha`
 - 선택: `paths`, `issue_or_pr_url`, `issue_or_pr_number`
 
-웹훅 JSON 필수 필드는 `schema_version` `"1"`, `handoff_id`, `repo`, `github_ref`, `idempotency_key`, `title`, `status`, `summary`, `created_at`, `links`, `next_owner`다. `reply_to`와 `requested_by`는 선택이다. `links`가 없으면 `[]`다. `status`는 `in_progress`, `needs_input`, `completed`, `failed` 중 하나다. `task_id`, `diff`, `patch`, `source`는 넣지 않는다. 소스 전체와 비밀도 넣지 않는다.
+웹훅 JSON 필수 필드는 `schema_version` `"1"`, `handoff_id`, `attempt`, `report_seq`, `repo`, `github_ref`, `idempotency_key`, `title`, `status`, `summary`, `created_at`, `links`, `next_owner`다. `attempt`와 `report_seq`는 1 이상의 JSON 정수다. `reply_to`와 `requested_by`는 선택이다. `links`가 없으면 `[]`다. `status`는 `in_progress`, `needs_input`, `completed`, `failed` 중 하나다. `task_id`, `diff`, `patch`, `source`는 넣지 않는다. 소스 전체와 비밀도 넣지 않는다.
 
 ## 2. 승인이 필요한 행동과 금지
 
@@ -227,7 +227,7 @@ sudo systemctl status grok-cue.service
 
 성공 기준: `systemctl is-active grok-cue.service`가 `active`다.
 
-프로세스는 하나만 띄운다. `uvicorn --workers`를 붙이지 않고, 서비스 인스턴스도 하나다. `ProtectSystem=strict`이면 [SETUP.md](SETUP.md)의 `ReadWritePaths=/var/lib/grok-cue` 드롭인이 필요하다. DB 디렉터리를 쓸 수 없으면 서버는 `503 storage_unavailable`를 돌려준다.
+프로세스는 하나만 띄운다. `uvicorn --workers`를 붙이지 않고, 서비스 인스턴스도 하나다. `ProtectSystem=strict`이면 [SETUP.md](SETUP.md)의 `ReadWritePaths=/var/lib/grok-cue` 드롭인이 필요하다. 이미 strict인 유닛은 `ReadWritePaths`만 추가한다. 그 예시가 `ProtectSystem=strict`도 넣으면, 기본 유닛에 없던 샌드박스가 새로 켜진다. DB 디렉터리를 쓸 수 없으면 `POST /v1/cue/tasks`가 `503 storage_unavailable`를 돌려준다. `GET /healthz`는 `ok`다.
 
 ### 3.5 HTTPS
 
@@ -274,6 +274,7 @@ sudo -u bridge .venv/bin/python scripts/check_bridge.py --send     # 전달을 �
 | 서명된 첫 POST | `202` | `status`=`received`, `executed`=`false` |
 | 같은 본문, 새 시각과 새 HMAC | `202` | 같은 `handoff_id`, `forwarded`=`false` |
 | 같은 `idempotency_key`, 다른 본문 | `409` | `{"error":"idempotency_conflict"}` |
+| 같은 `(handoff_id, attempt, report_seq)`, 다른 본문 | `409` | `{"error":"sequence_conflict"}` |
 
 `GROK_WEBHOOK_URL`과 `GROK_WEBHOOK_KEY`가 둘 다 있을 때만 첫 `202`의 `forwarded`가 `true`다. URL만 있거나 키만 있으면 `forwarded`는 `false`다. HTTP `202`는 Bridge가 요청을 받아 검증하고 메모리에 기록했다는 뜻이다. Grok이 받았다는 뜻도, 어떤 작업이 실행되었다는 뜻도 아니다. `forwarded: true`는 Grok 전달을 `add_task` 백그라운드 작업으로 예약했다는 뜻이다. Grok의 2xx 응답 확인이 아니고, 작업 완료도, Grok 루틴의 성공도 아니다.
 

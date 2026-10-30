@@ -19,6 +19,11 @@ def sign(key: str, timestamp: str, body: bytes) -> str:
     return hmac.new(key.encode("utf-8"), message, hashlib.sha256).hexdigest()
 
 
+def sign_v2(key: str, method: str, path: str, timestamp: str, body: bytes) -> str:
+    prefix = f"v2\n{method}\n{path}\n{timestamp}\n".encode("utf-8")
+    return hmac.new(key.encode("utf-8"), prefix + body, hashlib.sha256).hexdigest()
+
+
 def github_ref(**overrides: object) -> dict[str, object]:
     ref: dict[str, object] = {
         "repo": REPO,
@@ -35,6 +40,8 @@ def task_body(**overrides: object) -> bytes:
     payload: dict[str, object] = {
         "schema_version": "1",
         "handoff_id": HANDOFF_ID,
+        "attempt": 1,
+        "report_seq": 1,
         "repo": REPO,
         "idempotency_key": "idem-1",
         "title": "dummy handoff",

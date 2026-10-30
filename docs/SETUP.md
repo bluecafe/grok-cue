@@ -141,7 +141,7 @@ sudo systemctl status grok-cue.service
 
 프로세스는 하나만 띄웁니다. `uvicorn --workers`나 서비스 인스턴스를 여러 개 두지 않습니다. 아웃박스 워커는 프로세스 안에 하나뿐입니다.
 
-`ProtectSystem=strict`를 쓰면 DB 디렉터리는 읽기 전용으로 막힙니다. 예시 경로 `/var/lib/grok-cue`만 쓰려면 드롭인을 `/etc/systemd/system/grok-cue.service.d/state-db.conf`에 둡니다. 이 블록도 문서 예시입니다.
+`ProtectSystem=strict`를 쓰면 DB 디렉터리는 읽기 전용으로 막힙니다. 예시 경로 `/var/lib/grok-cue`만 쓰려면 드롭인을 `/etc/systemd/system/grok-cue.service.d/state-db.conf`에 둡니다. 이 블록도 문서 예시입니다. 이미 `ProtectSystem=strict`인 유닛은 `ReadWritePaths`만 추가합니다. 아래 예시는 `ProtectSystem=strict`도 포함하므로, 기본 유닛에 없던 샌드박스가 새로 켜집니다.
 
 ```ini
 [Service]
@@ -155,7 +155,7 @@ sudo chown bridge:bridge /var/lib/grok-cue
 sudo chmod 700 /var/lib/grok-cue
 ```
 
-`.env`의 `CUE_STATE_DB` 예시는 `/var/lib/grok-cue/state.sqlite`입니다. 이 디렉터리를 쓸 수 없으면 서버는 `503 storage_unavailable`를 돌려줍니다.
+`.env`의 `CUE_STATE_DB` 예시는 `/var/lib/grok-cue/state.sqlite`입니다. 이 디렉터리를 쓸 수 없으면 `POST /v1/cue/tasks`는 `503 storage_unavailable`를 돌려줍니다. `GET /healthz`는 그대로 `ok`입니다.
 
 ## 3. HTTPS 역방향 프록시
 
@@ -229,7 +229,7 @@ Cue는 `POST https://hook.example.com/v1/cue/tasks`로 JSON을 보냅니다. 로
 
 - `Authorization: Bearer <CUE_BRIDGE_TOKEN>`
 - `X-Cue-Timestamp`: 지금 Unix 초. 서버 시각과 300초 안이어야 합니다
-- `X-Cue-Signature`: `{timestamp}.{raw_body}`의 HMAC-SHA256 hex(대소문자 구분 없음). `sha256=`은 붙이지 않습니다
+- `X-Cue-Signature`: HMAC-SHA256 hex(대소문자 구분 없음). `sha256=`은 붙이지 않습니다. 버전 헤더가 없으면 입력은 `{timestamp}.{raw_body}`(v1)입니다. `X-Cue-Signature-Version: 2`이면 입력은 `v2`, METHOD, PATH, timestamp, raw_body를 줄바꿈으로 이은 값입니다. 그 밖의 버전은 `401`입니다. v1은 아직 받습니다
 - `Content-Type: application/json`
 
 서명의 점은 타임스탬프 문자열과 본문 바이트 사이에 하나만 있습니다. 본문을 다시 JSON으로 만들면 바이트가 달라져 서명이 맞지 않습니다. 처음 보낸 바이트를 보관합니다.
@@ -269,7 +269,7 @@ Cue 쪽 흐름:
 
 1. 본문 JSON 바이트를 한 번 만들고 보관합니다.
 2. 현재 Unix 초를 `X-Cue-Timestamp`에 넣습니다.
-3. `{timestamp}.{본문 바이트}`의 HMAC-SHA256 hex를 `X-Cue-Signature`에 넣습니다.
+3. 버전 헤더가 없으면 `{timestamp}.{본문 바이트}`의 HMAC-SHA256 hex를 `X-Cue-Signature`에 넣습니다. v2는 `X-Cue-Signature-Version: 2`와 함께 `v2`, METHOD, PATH, timestamp, 본문 바이트를 줄바꿈으로 잇습니다.
 4. `Authorization`, `Content-Type: application/json`과 함께 POST합니다.
 
 이 순서를 그대로 구현한 **참고용 송신기**가 [`scripts/check_bridge.py`](../scripts/check_bridge.py)입니다(6절). 기본은 dry-run이라 아무것도 보내지 않습니다. 실제로 보내려면 `--send`가 필요합니다. 시험 요청은 Grok Bot에 실제 전달을 일으킬 수 있습니다. 2026-10-29 확인은 현재 Cue 환경의 한 건입니다. 다른 환경에서 Cue가 이 요청을 직접 보내지 못하면, 이 스크립트와 같은 방식으로 보냅니다.
@@ -280,9 +280,9 @@ Cue 쪽 흐름:
 
 Grok 루틴은 그 주소에서 POST를 받습니다. `GROK_WEBHOOK_KEY_HEADER`가 비어 있으면 헤더는 `Authorization: Bearer <GROK_WEBHOOK_KEY>`입니다. 헤더 이름을 적으면 그 이름의 값으로 키만 옵니다. Bearer 접두사는 붙지 않습니다.
 
-받는 JSON 키는 이 8개뿐입니다([DESIGN.md 스펙](DESIGN.md#스펙)).
+받는 JSON 키는 이 10개뿐입니다([DESIGN.md 스펙](DESIGN.md#스펙)).
 
-`handoff_id`, `repo`, `github_ref`, `status`, `summary`, `links`, `next_owner`, `idempotency_key`
+`handoff_id`, `attempt`, `report_seq`, `repo`, `github_ref`, `status`, `summary`, `links`, `next_owner`, `idempotency_key`
 
 `schema_version`, `title`, `created_at`, `reply_to`, `requested_by`는 포함되지 않습니다. 메일은 이 프로세스가 보내지 않습니다.
 
@@ -330,6 +330,7 @@ sudo -u bridge .venv/bin/python scripts/check_bridge.py --send     # 전달을 �
 | `400` `invalid_request` | 본문 형식입니다. `fields`에 항목이 있습니다 | `Content-Type`이 `application/json`인지, 본문이 64 KiB 이하인지, [DESIGN.md](DESIGN.md)의 필드 이름과 맞는지 봅니다 |
 | `400` `task_id_not_allowed` | 본문 어딘가에 `task_id`가 있습니다 | 그 키를 빼고 `handoff_id`만 씁니다 |
 | `409` `idempotency_conflict` | 같은 `idempotency_key`로 다른 본문 바이트를 보냈습니다 | 처음 보낸 바이트를 그대로 다시 보냅니다. JSON 키 순서만 바뀌어도 다른 본문입니다. 첫 접수는 그대로 남습니다 |
+| `409` `sequence_conflict` | 같은 `(handoff_id, attempt, report_seq)`로 다른 본문 바이트를 보냈습니다 | 그 세대의 첫 본문을 유지합니다. 이전 세대는 저장만 하고 전달하지 않습니다 |
 | `202`인데 `forwarded`가 `false` | 이번 요청에서 Grok 전달을 예약하지 않았습니다 | `GROK_WEBHOOK_URL`과 `GROK_WEBHOOK_KEY`가 둘 다 있는지 봅니다. 하나라도 비어 있으면 전달하지 않습니다. 같은 본문의 재전송도 `forwarded`가 `false`입니다 |
 | `202`인데 Grok에 도착하지 않음 | 예약과 성공은 다릅니다. 전달 실패도 Cue의 `202`는 바뀌지 않습니다 | URL이 Grok 루틴의 수신 주소인지, 키 헤더 이름이 루틴과 같은지 봅니다. 제한 시간은 5초입니다 |
 | `dig` 결과가 비어 있음 | DNS가 아직 이 서버를 가리키지 않습니다 | A 또는 AAAA 이름과 값을 확인합니다. 퍼질 때까지 기다린 뒤 `dig`와 `nslookup`을 다시 실행합니다 |

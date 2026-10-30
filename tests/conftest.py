@@ -17,7 +17,7 @@ from app.forward import GrokForwarder
 from app.main import create_app
 from app.notify import LogNotifier
 from app.settings import Settings
-from tests.support import FIXED_NOW, HMAC_KEY, TOKEN, sign
+from tests.support import FIXED_NOW, HMAC_KEY, TOKEN, sign, sign_v2
 
 
 class RecordingNotifier:
@@ -60,17 +60,27 @@ class Harness:
         token: str | None = None,
         hmac_key: str | None = None,
         signature: str | None = None,
+        signature_version: str | None = None,
+        sign_method: str = "POST",
+        sign_path: str = "/v1/cue/tasks",
         content_type: str | None = "application/json",
         drop: tuple[str, ...] = (),
     ):
         ts_value = str(int(self.now) if timestamp is None else timestamp)
         key = self.settings.cue_bridge_hmac_key if hmac_key is None else hmac_key
-        sig = sign(key, ts_value, body) if signature is None else signature
+        if signature is not None:
+            sig = signature
+        elif signature_version is not None and signature_version.strip() == "2":
+            sig = sign_v2(key, sign_method, sign_path, ts_value, body)
+        else:
+            sig = sign(key, ts_value, body)
         headers = {
             "Authorization": f"Bearer {token if token is not None else self.settings.cue_bridge_token}",
             "X-Cue-Timestamp": ts_value,
             "X-Cue-Signature": sig,
         }
+        if signature_version is not None:
+            headers["X-Cue-Signature-Version"] = signature_version
         if content_type is not None:
             headers["Content-Type"] = content_type
         for name in drop:

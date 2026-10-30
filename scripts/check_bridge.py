@@ -47,6 +47,8 @@ def test_body(handoff_id: str, idempotency_key: str, summary: str) -> bytes:
     payload = {
         "schema_version": "1",
         "handoff_id": handoff_id,
+        "attempt": 1,
+        "report_seq": 1,
         "repo": "owner/name",
         "github_ref": {"repo": "owner/name", "base_branch": "main", "start_sha": "a" * 40},
         "idempotency_key": idempotency_key,
@@ -61,6 +63,7 @@ def test_body(handoff_id: str, idempotency_key: str, summary: str) -> bytes:
 
 
 def sign(key: str, timestamp: str, raw: bytes) -> str:
+    """v1 signature. A request with no version header is still accepted."""
     return hmac.new(key.encode("utf-8"), timestamp.encode("ascii") + b"." + raw, hashlib.sha256).hexdigest()
 
 

@@ -9,17 +9,17 @@ This document describes, in plain terms, the JSON accepted by `POST /v1/cue/task
 This document is the single spec for request fields. The code (`app/models.py`) must match it exactly; `tests/test_spec.py` compares the lists in this section with the model fields.
 
 1. **Body size limit:** 65536 bytes (64 KiB), checked before authentication. A `Content-Length` above it (or non-numeric) is rejected immediately, and chunked bodies without a length stop being read once they exceed it. Response: `400` `{"error":"invalid_request","fields":["body"]}`. This value is a project decision and may become configurable later.
-2. **Accepted fields:** exactly these 13. Any other key returns `400 invalid_request`.
-   - Request fields: `schema_version`, `handoff_id`, `repo`, `github_ref`, `idempotency_key`, `title`, `status`, `summary`, `created_at`, `links`, `next_owner`, `reply_to`, `requested_by`
+2. **Accepted fields:** exactly these 15. Any other key returns `400 invalid_request`.
+   - Request fields: `schema_version`, `handoff_id`, `attempt`, `report_seq`, `repo`, `github_ref`, `idempotency_key`, `title`, `status`, `summary`, `created_at`, `links`, `next_owner`, `reply_to`, `requested_by`
    - `github_ref` fields: `repo`, `base_branch`, `start_sha`, `paths`, `issue_or_pr_url`, `issue_or_pr_number`
-3. **Forwarding rule:** of the 13 accepted fields, only these 8 are forwarded to Grok Bot, in this order. `schema_version`, `title`, `created_at`, `reply_to`, `requested_by` are not forwarded. Optional `github_ref` items without a value are omitted. `executed` and `forwarded` are response-only and not sent.
-   - Forwarded fields: `handoff_id`, `repo`, `github_ref`, `status`, `summary`, `links`, `next_owner`, `idempotency_key`
+3. **Forwarding rule:** of the 15 accepted fields, only these 10 are forwarded to Grok Bot, in this order. `schema_version`, `title`, `created_at`, `reply_to`, `requested_by` are not forwarded. Optional `github_ref` items without a value are omitted. `executed` and `forwarded` are response-only and not sent.
+   - Forwarded fields: `handoff_id`, `attempt`, `report_seq`, `repo`, `github_ref`, `status`, `summary`, `links`, `next_owner`, `idempotency_key`
 
 ## What the server does
 
 It accepts correctly signed JSON. The response is `202` with `status: "received"`. `executed` is always `false`. This response is not approval to execute, merge, deploy, or pay.
 
-When both `GROK_WEBHOOK_URL` and `GROK_WEBHOOK_KEY` are set, only the 8 fields listed in the spec are forwarded to Grok Bot after acceptance (see [Spec](#spec), item 3). No mail is sent. The timeout is 5 s. A failed forward does not change the `202` already returned.
+When both `GROK_WEBHOOK_URL` and `GROK_WEBHOOK_KEY` are set, only the 10 fields listed in the spec are forwarded to Grok Bot after acceptance (see [Spec](#spec), item 3). No mail is sent. The timeout is 5 s. A failed forward does not change the `202` already returned. A report older than the stored `(attempt, report_seq)` is stored and not forwarded.
 
 Without `GROK_WEBHOOK_KEY_HEADER` it sends `Authorization: Bearer <GROK_WEBHOOK_KEY>`; with a header name, the bare key goes in that header.
 
@@ -80,6 +80,8 @@ This table is the whole body. Any other key returns `400 invalid_request`.
 | --- | --- | --- |
 | `schema_version` | yes | The string `"1"` |
 | `handoff_id` | yes | UUID created by the sender; echoed in the response |
+| `attempt` | yes | JSON integer `1`–`9223372036854775807`. Increases on each rerun of the same `handoff_id`. Booleans, fractions, and strings are rejected |
+| `report_seq` | yes | JSON integer `1`–`9223372036854775807`. Increases on each report inside one `attempt`, and starts again at 1 when `attempt` changes |
 | `repo` | yes | `owner/name`; must equal `github_ref.repo` |
 | `github_ref` | yes | The object above |
 | `idempotency_key` | yes | 1–200 characters, no whitespace or control characters. Body only |
@@ -111,3 +113,5 @@ Reply addresses are set only via environment variables. No address is hard-coded
 ```
 
 For the same key and the same body, `handoff_id`, `status`, and `executed` match the first acceptance and `forwarded` is `false`. Logs never contain tokens, HMAC keys, the Grok key, signatures, bodies, or summaries.
+
+Order is lexicographic on `(attempt, report_seq)`. A report older than the stored generation is recorded only: the current generation stays, and that report is not forwarded. A different body for the same `(handoff_id, attempt, report_seq)` returns `409` `{"error":"sequence_conflict"}` and leaves the first acceptance in place. A different body for the same `idempotency_key` is still `409` `{"error":"idempotency_conflict"}`.

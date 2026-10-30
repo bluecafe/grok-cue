@@ -2,7 +2,7 @@
 
 # 변경 기록
 
-현재 버전은 `0.0.5`입니다. 값은 저장소 루트의 [`VERSION`](VERSION)에 둡니다. 앱은 이 파일을 FastAPI `version` 필드에만 읽습니다. `/healthz`를 포함한 응답 본문에는 버전을 넣지 않습니다.
+현재 버전은 `0.1.0`입니다. 값은 저장소 루트의 [`VERSION`](VERSION)에 둡니다. 앱은 이 파일을 FastAPI `version` 필드에만 읽습니다. `/healthz`를 포함한 응답 본문에는 버전을 넣지 않습니다.
 
 ## 버전 규칙
 
@@ -25,6 +25,26 @@
 - 2026-10-29 E2E는 성공한 요청 기록 한 건입니다. Grok 쪽 수신은 노른(사용자)가 16:05 KST에 따로 확인했습니다.
 - 문서와 README에서 소유자는 한국어로 노른(사용자), 영어로 Norn (user)입니다. 실명으로 바꿀 기존 표기는 없었습니다.
 - 버전 관리를 `VERSION`, 이 기록, README의 한 줄에만 추가했습니다. 앱 코드는 바꾸지 않았고, 태그는 만들지 않았습니다.
+
+## 0.1.0 — 2026-10-30
+
+MINOR + **BREAKING**. P8 HMAC v2와 P13 순번 필드입니다.
+
+### 깨지는 변경
+
+- `attempt`와 `report_seq`가 필수입니다. JSON 정수이며 1 이상입니다. 없거나 다른 형식이면 `400`입니다.
+- Grok으로 넘기는 필드는 10개입니다. `handoff_id`, `attempt`, `report_seq` 다음에 기존 8개가 옵니다.
+- 같은 `(handoff_id, attempt, report_seq)`에 다른 본문이면 `409 sequence_conflict`입니다. 같은 `idempotency_key`에 다른 본문은 여전히 `409 idempotency_conflict`입니다.
+
+### 기능
+
+- 서명 버전 헤더가 없으면 v1(`{timestamp}.{raw_body}`)입니다. `X-Cue-Signature-Version: 2`이면 입력이 `v2`, METHOD, PATH, timestamp, raw_body를 줄바꿈으로 이은 값입니다. 그 밖의 버전은 `401`입니다. v1은 아직 거절하지 않습니다.
+- 순서는 `(attempt, report_seq)` 사전순입니다. 이전 세대는 저장만 하고, 현재 세대는 바꾸지 않으며 전달하지 않습니다.
+
+### 문서
+
+- `503 storage_unavailable`는 `POST /v1/cue/tasks`에 해당합니다. `GET /healthz`는 `ok`입니다.
+- 이미 `ProtectSystem=strict`인 유닛은 `ReadWritePaths`만 추가합니다. 예시 드롭인이 `ProtectSystem=strict`도 넣으면, 기본 유닛에 없던 샌드박스가 켜집니다.
 
 ## 0.0.5 — 2026-10-30
 

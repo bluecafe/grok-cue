@@ -2,7 +2,7 @@
 
 # Changelog
 
-The current version is `0.0.5`. The value lives in [`VERSION`](VERSION) at the repository root. The app reads that file only for the FastAPI `version` field. No response body, including `/healthz`, includes the version.
+The current version is `0.1.0`. The value lives in [`VERSION`](VERSION) at the repository root. The app reads that file only for the FastAPI `version` field. No response body, including `/healthz`, includes the version.
 
 ## Version rules
 
@@ -25,6 +25,26 @@ Pre-1.0, and bumped in a SemVer-like way.
 - The 2026-10-29 E2E is one successful request record. Grok-side receipt was confirmed separately by Norn (user) at 16:05 KST.
 - In docs and READMEs the owner is 노른(사용자) in Korean and Norn (user) in English. There was no existing personal-name wording to replace.
 - Versioning was added only in `VERSION`, this changelog, and one README line. Application code was not changed, and no tag was created.
+
+## 0.1.0 — 2026-10-30
+
+MINOR and **BREAKING**. This is P8 HMAC v2 and the P13 sequence fields.
+
+### Breaking changes
+
+- `attempt` and `report_seq` are required JSON integers greater than or equal to 1. Missing or any other type is `400`.
+- Ten fields are forwarded to Grok. `handoff_id`, `attempt`, and `report_seq` come before the previous eight.
+- A different body for the same `(handoff_id, attempt, report_seq)` is `409 sequence_conflict`. A different body for the same `idempotency_key` is still `409 idempotency_conflict`.
+
+### Features
+
+- No signature-version header means v1 (`{timestamp}.{raw_body}`). `X-Cue-Signature-Version: 2` signs `v2`, METHOD, PATH, timestamp, and raw_body joined by newlines. Any other version is `401`. v1 is not rejected yet.
+- Order is lexicographic on `(attempt, report_seq)`. An older generation is stored only. The current generation is left unchanged and that older report is not forwarded.
+
+### Docs
+
+- `503 storage_unavailable` applies to `POST /v1/cue/tasks`. `GET /healthz` stays `ok`.
+- A unit that is already `ProtectSystem=strict` should add only `ReadWritePaths`. The example drop-in also sets `ProtectSystem=strict`, which turns that sandbox on when the base unit did not have it.
 
 ## 0.0.5 — 2026-10-30
 

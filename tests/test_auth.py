@@ -6,7 +6,7 @@ import pytest
 
 from app.auth import hmac_sha256_hex
 from tests.conftest import Harness
-from tests.support import HMAC_KEY, TOKEN, task_body
+from tests.support import HMAC_KEY, TOKEN, sign, sign_v2, task_body
 
 PINNED_HMAC = "bbb8be9666a8373efa71ffb4bbed69890ab4d7572cba1792c6bfede89cabdbef"
 
@@ -131,3 +131,93 @@ def test_auth_reason_log_has_no_secret(
     assert bad_token not in text
     assert bad_signature not in text
     assert summary not in text
+
+
+def test_v2_signature_binds_method_and_path(harness: Harness) -> None:
+    ts = int(harness.now)
+    accepted = harness.post(
+        task_body(idempotency_key="idem-v2-ok"),
+        timestamp=ts,
+        signature_version="2",
+    )
+    assert accepted.status_code == 202
+
+    method_body = task_body(idempotency_key="idem-v2-method", report_seq=2)
+    method_ts = str(ts + 1)
+    bad_method = sign_v2(HMAC_KEY, "GET", "/v1/cue/tasks", method_ts, method_body)
+    rejected_method = harness.post(
+        method_body,
+        timestamp=ts + 1,
+        signature=bad_method,
+        signature_version="2",
+    )
+    assert rejected_method.status_code == 401
+
+    path_body = task_body(idempotency_key="idem-v2-path", report_seq=3)
+    path_ts = str(ts + 2)
+    bad_path = sign_v2(HMAC_KEY, "POST", "/v1/other", path_ts, path_body)
+    rejected_path = harness.post(
+        path_body,
+        timestamp=ts + 2,
+        signature=bad_path,
+        signature_version="2",
+    )
+    assert rejected_path.status_code == 401
+
+    v1_body = task_body(idempotency_key="idem-v2-material", report_seq=4)
+    v1_sig = sign(HMAC_KEY, str(ts + 3), v1_body)
+    rejected_v1 = harness.post(
+        v1_body,
+        timestamp=ts + 3,
+        signature=v1_sig,
+        signature_version="2",
+    )
+    assert rejected_v1.status_code == 401
+
+    naked = task_body(idempotency_key="idem-v2-naked", report_seq=5)
+    naked_sig = sign_v2(HMAC_KEY, "POST", "/v1/cue/tasks", str(ts + 4), naked)
+    rejected_naked = harness.post(naked, timestamp=ts + 4, signature=naked_sig)
+    assert rejected_naked.status_code == 401
+    assert rejected_naked.json() == {"error": "unauthorized"}
+
+
+def test_v1_v2_overlap_window(harness: Harness) -> None:
+    v1 = harness.post(task_body(idempotency_key="idem-overlap-v1", report_seq=1))
+    v2 = harness.post(
+        task_body(idempotency_key="idem-overlap-v2", report_seq=2),
+        timestamp=int(harness.now) + 1,
+        signature_version="2",
+    )
+    padded = harness.post(
+        task_body(idempotency_key="idem-overlap-pad", report_seq=3),
+        timestamp=int(harness.now) + 2,
+        signature_version=" 2 ",
+    )
+    v1_again = harness.post(
+        task_body(idempotency_key="idem-overlap-v1b", report_seq=4),
+        timestamp=int(harness.now) + 3,
+    )
+    assert v1.status_code == 202
+    assert v2.status_code == 202
+    assert padded.status_code == 202
+    assert v1_again.status_code == 202
+
+
+def test_unknown_signature_version_401(
+    harness: Harness,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.INFO, logger="grok_cue")
+    leaked = "version-header-secret"
+    versions = ("1", "3", "v2", "0", "", leaked)
+    for offset, version in enumerate(versions):
+        response = harness.post(
+            task_body(idempotency_key=f"idem-unknown-{offset}"),
+            timestamp=int(harness.now) + offset,
+            signature_version=version,
+        )
+        assert response.status_code == 401
+        assert response.json() == {"error": "unauthorized"}
+    assert "unknown_signature_version" in caplog.text
+    assert leaked not in caplog.text
+    assert harness.notifier.events == []

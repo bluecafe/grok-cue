@@ -25,7 +25,7 @@ from app.outbox import (
     jitter_factor,
     over_budget,
 )
-from app.store import IdempotencyConflict, RegisterResult
+from app.store import IdempotencyConflict, RegisterResult, SequenceConflict, is_older_generation
 
 logger = logging.getLogger("grok_cue")
 
@@ -85,6 +85,27 @@ class StateDB:
                     first_attempt_at REAL,
                     next_attempt_at REAL,
                     run INTEGER NOT NULL
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS report_sequence (
+                    handoff_id TEXT NOT NULL,
+                    attempt INTEGER NOT NULL,
+                    report_seq INTEGER NOT NULL,
+                    body_sha256 TEXT NOT NULL,
+                    idempotency_key TEXT NOT NULL,
+                    PRIMARY KEY (handoff_id, attempt, report_seq)
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS handoff_generation (
+                    handoff_id TEXT PRIMARY KEY,
+                    attempt INTEGER NOT NULL,
+                    report_seq INTEGER NOT NULL
                 )
                 """
             )
@@ -150,12 +171,15 @@ class StateDB:
         response: dict[str, object],
         *,
         handoff_id: str,
+        attempt: int,
+        report_seq: int,
         forward_payload: dict | None,
         forwarding: bool,
     ) -> RegisterResult:
         """Commit the replay row and the acceptance row in one transaction.
 
         The caller returns 202 only after this commit succeeds.
+        An older generation is stored and is not placed in the outbox.
         """
         digest = hashlib.sha256(raw_body).hexdigest()
         with self._lock:
@@ -170,29 +194,93 @@ class StateDB:
                     "SELECT body_sha256, response_json FROM idempotency WHERE idempotency_key = ?",
                     (key,),
                 ).fetchone()
-                if row is None:
-                    payload = json.dumps(response, separators=(",", ":"), sort_keys=True)
-                    conn.execute(
-                        "INSERT INTO idempotency (idempotency_key, body_sha256, response_json) VALUES (?, ?, ?)",
-                        (key, digest, payload),
-                    )
-                    self._insert_outbox(conn, key, handoff_id, forward_payload, forwarding, now)
+                if row is not None:
+                    if row[0] != digest:
+                        self._commit(conn)
+                        raise IdempotencyConflict
                     self._commit(conn)
-                    stored = json.loads(payload)
+                    stored = json.loads(row[1])
                     if not isinstance(stored, dict):
                         raise StorageUnavailable
-                    return RegisterResult(response=stored, created=True)
-                if row[0] != digest:
+                    return RegisterResult(response=stored, created=False, enqueue=False)
+                sequence = conn.execute(
+                    """
+                    SELECT body_sha256, idempotency_key
+                    FROM report_sequence
+                    WHERE handoff_id = ? AND attempt = ? AND report_seq = ?
+                    """,
+                    (handoff_id, attempt, report_seq),
+                ).fetchone()
+                if sequence is not None:
+                    if sequence[0] != digest:
+                        self._commit(conn)
+                        raise SequenceConflict
+                    original = conn.execute(
+                        "SELECT response_json FROM idempotency WHERE idempotency_key = ?",
+                        (sequence[1],),
+                    ).fetchone()
+                    if original is None:
+                        self._safe_rollback(conn)
+                        raise StorageUnavailable
+                    conn.execute(
+                        "INSERT INTO idempotency (idempotency_key, body_sha256, response_json) VALUES (?, ?, ?)",
+                        (key, digest, original[0]),
+                    )
                     self._commit(conn)
-                    raise IdempotencyConflict
+                    stored = json.loads(original[0])
+                    if not isinstance(stored, dict):
+                        raise StorageUnavailable
+                    return RegisterResult(response=stored, created=False, enqueue=False)
+                payload = json.dumps(response, separators=(",", ":"), sort_keys=True)
+                conn.execute(
+                    "INSERT INTO idempotency (idempotency_key, body_sha256, response_json) VALUES (?, ?, ?)",
+                    (key, digest, payload),
+                )
+                conn.execute(
+                    """
+                    INSERT INTO report_sequence (
+                        handoff_id, attempt, report_seq, body_sha256, idempotency_key
+                    ) VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (handoff_id, attempt, report_seq, digest, key),
+                )
+                cursor = conn.execute(
+                    "SELECT attempt, report_seq FROM handoff_generation WHERE handoff_id = ?",
+                    (handoff_id,),
+                ).fetchone()
+                current = None if cursor is None else (int(cursor[0]), int(cursor[1]))
+                older = is_older_generation(current, attempt, report_seq)
+                if not older:
+                    conn.execute(
+                        """
+                        INSERT INTO handoff_generation (handoff_id, attempt, report_seq)
+                        VALUES (?, ?, ?)
+                        ON CONFLICT(handoff_id) DO UPDATE SET
+                            attempt = excluded.attempt,
+                            report_seq = excluded.report_seq
+                        """,
+                        (handoff_id, attempt, report_seq),
+                    )
+                    self._insert_outbox(conn, key, handoff_id, forward_payload, forwarding, now)
                 self._commit(conn)
-                stored = json.loads(row[1])
+                stored = json.loads(payload)
                 if not isinstance(stored, dict):
                     raise StorageUnavailable
-                return RegisterResult(response=stored, created=False)
+                return RegisterResult(response=stored, created=True, enqueue=not older)
             except sqlite3.Error:
                 self._safe_rollback(conn)
                 raise StorageUnavailable from None
+
+    def current_generation(self, handoff_id: str) -> tuple[int, int] | None:
+        with self._lock:
+            conn = self._require()
+            row = conn.execute(
+                "SELECT attempt, report_seq FROM handoff_generation WHERE handoff_id = ?",
+                (handoff_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return int(row[0]), int(row[1])
 
     def view(self, key: str) -> tuple[bool, str]:
         with self._lock:

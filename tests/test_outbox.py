@@ -267,7 +267,7 @@ def test_startup_pump_recovers_sending_and_due_rows(tmp_path: Path) -> None:
 
     due_capture = Capture(status=503)
     due_app = _harness(due_capture, state_db=str(database), jitter=lambda: 1.0, auto_pump=False)
-    due_app.post(task_body(idempotency_key="idem-due"))
+    due_app.post(task_body(idempotency_key="idem-due", report_seq=2))
     due_app.pump(float(FIXED_NOW))
     assert due_app.outbox.snapshot("idem-due")["state"] == "retrying"
     due_app.http.close()
