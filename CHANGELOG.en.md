@@ -2,7 +2,7 @@
 
 # Changelog
 
-The current version is `0.1.0`. The value lives only in [`VERSION`](VERSION) at the repository root. The app does not read that file, and no response, including `/healthz`, includes the version.
+The current version is `0.0.2`. The value lives only in [`VERSION`](VERSION) at the repository root. The app does not read that file, and no response, including `/healthz`, includes the version.
 
 ## Version rules
 
@@ -18,9 +18,9 @@ Pre-1.0, and bumped in a SemVer-like way.
 
 ## Unreleased
 
-## 0.1.0
+## 0.0.2
 
-MINOR. The request fields, the signature, and the meaning of the `202` response are unchanged. This is not BREAKING. There are no retries and no outbox.
+PATCH. `0.1.0` is reserved for the BREAKING release with P8 HMAC v2 and the P13 sequence fields. The request fields, the signature, and the meaning of the `202` response are unchanged. There are no retries and no outbox.
 
 ### Features
 
