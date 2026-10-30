@@ -178,7 +178,7 @@ Locally without a proxy, use `http://127.0.0.1:8160`.
 
 ## 4. Environment variables
 
-All settings live in one `.env` file, which the check script also reads. The app reads the eleven names in `app/settings.py`. `PUBLIC_BASE_URL` is read only by docs and the check script, never by the app.
+All settings live in one `.env` file, which the check script also reads. The app reads the twelve names in `app/settings.py`. `PUBLIC_BASE_URL` is read only by docs and the check script, never by the app.
 
 Generate the token and the HMAC key separately (run twice, use different values):
 
@@ -204,6 +204,7 @@ GROK_WEBHOOK_KEY_HEADER=
 PUBLIC_BASE_URL=https://hook.example.com
 CUE_STATE_DB=
 CUE_OUTBOX_POLL_SECONDS=5
+CUE_SUMMARY_RETENTION_DAYS=30
 ```
 
 | Variable | Required | Read by | Meaning | Example |
@@ -219,6 +220,7 @@ CUE_OUTBOX_POLL_SECONDS=5
 | `GROK_WEBHOOK_KEY_HEADER` | no | app | Empty: `Authorization: Bearer <GROK_WEBHOOK_KEY>`. Set: the bare key in that header | empty, or `X-Grok-Key` |
 | `CUE_STATE_DB` | no | app | SQLite path for acceptance, replay, and the outbox. Empty: process memory only. No built-in path | empty, or `/var/lib/grok-cue/state.sqlite` |
 | `CUE_OUTBOX_POLL_SECONDS` | no | app | Outbox poll interval in seconds for this process. Default 5. Values ≤ 0 stop startup. Also pumps once at startup | `5` |
+| `CUE_SUMMARY_RETENTION_DAYS` | no | app | Days before `summary` is removed from `delivered` and `dead` rows. Default 30. Values ≤ 0 stop startup. `queued` and `sending` rows are kept | `30` |
 | `PUBLIC_BASE_URL` | check script | docs only | Address the check script calls. The app ignores it. The script stops if empty | `https://hook.example.com` |
 
 Empty optional values mean "off". With `GROK_WEBHOOK_URL` and `GROK_WEBHOOK_KEY` left empty as in the example, copying the file does not forward anything. No address is hard-coded.
@@ -306,7 +308,7 @@ The health check has no auth. Replace the host with your domain.
 curl -sS -D - https://hook.example.com/healthz
 ```
 
-`200` with body `ok` means the process is up.
+`200` with body `ok` means the process is up. `/docs`, `/redoc`, and `/openapi.json` return `404`. Every response includes `Content-Security-Policy: default-src 'none'; frame-ancestors 'none'`, and `X-Content-Type-Options: nosniff` when that header is not already set.
 
 ### Check script `scripts/check_bridge.py`
 
@@ -331,7 +333,7 @@ Use `--env PATH` if `.env` lives elsewhere. Resending the exact same timestamp a
 | Symptom | Meaning | Check |
 | --- | --- | --- |
 | `401` `unauthorized` | Bearer, HMAC, time, or signature reuse failed. Which one is not disclosed | Token and HMAC key match the server `.env`; `X-Cue-Timestamp` within 300 s; fix clock skew; no `sha256=`; if you resent a signature, regenerate timestamp and signature |
-| `400` `reply_to_not_allowed` | Address not accepted. `allowed` is the server list; the rejected address is not echoed | Is `REPLY_TO_ALLOWLIST` empty, is `reply_to` on it, is `REPLY_TO_DEFAULT` empty or off-list? `mailto:` and multiple recipients are rejected. Restart after changes |
+| `400` `reply_to_not_allowed` | Address not accepted. The response is only the reason code; the allowlist and the rejected address are not returned | Is `REPLY_TO_ALLOWLIST` empty, is `reply_to` on it, is `REPLY_TO_DEFAULT` empty or off-list? `mailto:` and multiple recipients are rejected. Restart after changes |
 | `400` `invalid_request` | Body format; see `fields` | `Content-Type: application/json`, body ≤ 64 KiB, field names per [DESIGN.en.md](DESIGN.en.md) |
 | `400` `task_id_not_allowed` | A `task_id` key somewhere in the body | Remove it; use `handoff_id` only |
 | `409` `idempotency_conflict` | Different bytes with the same `idempotency_key` | Resend the original bytes. Reordered JSON keys count as a different body. The first acceptance stays |

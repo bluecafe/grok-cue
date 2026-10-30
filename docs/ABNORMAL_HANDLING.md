@@ -158,6 +158,12 @@ v2를 도입한 뒤의 전환은 아래와 같습니다.
 - 0.2.0 배포 확인 [확인] / [confirmed], 2026-10-30 23:00 KST: v1과 버전 헤더가 없는 더미 요청은 둘 다 `401`(`unknown_signature_version`)이었고 아웃박스에는 쌓이지 않았습니다. v2 더미 요청은 `202`, `delivered`, `signature_version=2`였습니다. `healthz`는 `200`이었습니다. Dummy requests with v1 and with no version header both returned `401` (`unknown_signature_version`) and nothing was queued in the outbox. A v2 dummy request returned `202`, was `delivered`, and stored `signature_version=2`. `healthz` returned `200`.
 - 테스트: `test_v1_header_is_401`, `test_missing_signature_version_is_401`, `test_v2_header_is_202`, `test_unknown_signature_version_401` [구현]
 
+### 5.4 응답 표면 [구현] (0.2.1)
+- `/docs`, `/redoc`, `/openapi.json`은 `404`이다. FastAPI 문서 화면은 열지 않는다. `/docs`, `/redoc`, and `/openapi.json` return 404. The FastAPI docs UI is not served. [구현]
+- 모든 응답에 `Content-Security-Policy: default-src 'none'; frame-ancestors 'none'`을 붙인다. `X-Content-Type-Options: nosniff`가 없으면 붙인다. Every response sends that content security policy, and adds `nosniff` when it is not already set. [구현]
+- `reply_to` 거절은 `{"error":"reply_to_not_allowed"}`만 돌려준다. 허용 메일 목록은 넣지 않는다. A reply_to rejection returns only the reason code. [구현]
+- 테스트: `test_docs_routes_are_404`, `test_security_headers_on_healthz_docs_and_rejection`, `test_existing_nosniff_value_is_left_in_place`, `test_reply_to_outside_allowlist_is_rejected`
+
 ## 6. 접수·전달 의미와 아웃박스 [구현]
 
 ### 6.1 정의
@@ -199,6 +205,10 @@ v2를 도입한 뒤의 전환은 아래와 같습니다.
 ```json
 {"handoff_id":"0f6c2d1e-0000-4000-8000-000000000001","status":"received","executed":false,"forwarded":true,"forward_state":"delivered"}
 ```
+
+### 6.4 요약 보관 [구현] (0.2.1)
+`CUE_SUMMARY_RETENTION_DAYS`(기본 30, 0 이하는 거절)가 지나면 `delivered` 또는 `dead`가 된 행의 아웃박스 `summary`를 지운다. 기간은 그 행이 `delivered` 또는 `dead`가 된 시각부터 센다. `queued`와 `sending`은 지우지 않는다. `retrying`도 끝낸 행이 아니라 지우지 않는다. 서명 재생 행은 요약 보관 기간이 아니라 서명 유효 시간(600초)이 지나면 삭제한다. Summary retention is [구현] / [implemented] (0.2.1): after `CUE_SUMMARY_RETENTION_DAYS` (default 30) the outbox `summary` is removed from rows that have been `delivered` or `dead` for that long. `queued` and `sending` rows are never changed. Replay rows are deleted once they are past the 600-second signature window.
+- 테스트: `test_delivered_summary_expires_only_after_the_retention_period`, `test_dead_summary_expires_after_the_retention_period`, `test_queued_and_sending_keep_summary`, `test_retrying_summary_is_kept`, `test_replay_rows_past_the_signature_window_are_deleted`, `test_memory_rows_follow_the_same_retention_rules`, `test_memory_replay_past_the_window_is_forgotten`
 
 ## 7. 재시도 정책 [구현]
 
@@ -495,7 +505,7 @@ stateDiagram-v2
 P3은 응답 의미를 바꾸므로(첫 202가 `forwarded:false`) Grok·Cue 공지가 함께 필요합니다.
 
 ### 12.1 버전 관리
-- 루트 `VERSION`은 **0.2.0**입니다. `CHANGELOG.md`와 `CHANGELOG.en.md`가 있습니다. 이 파일들은 PR #2에서 추가되었습니다. `0.0.1`은 main `2483c3b`의 기능과 문서입니다. 앱은 이 파일을 FastAPI `version` 필드에만 읽습니다. 0.1.1은 접수 로그와 접수 행의 `signature_version`입니다. 0.2.0은 v1 거절(BREAKING)입니다.
+- 루트 `VERSION`은 **0.2.1**입니다. `CHANGELOG.md`와 `CHANGELOG.en.md`가 있습니다. 이 파일들은 PR #2에서 추가되었습니다. `0.0.1`은 main `2483c3b`의 기능과 문서입니다. 앱은 이 파일을 FastAPI `version` 필드에만 읽습니다. 0.1.1은 접수 로그와 접수 행의 `signature_version`입니다. 0.2.0은 v1 거절(BREAKING)입니다. 0.2.1은 문서 경로 닫기, 응답 헤더, `reply_to` 사유 코드, 요약 보관입니다. The root `VERSION` is 0.2.1. 0.2.1 closes the docs routes, adds the response headers, returns only the reply_to reason code, and applies summary retention.
 - 1.0 전: 문서·버그 = PATCH, 기능 = MINOR, 호환 깨짐(서명·필드) = MINOR + **BREAKING**
 - 버전은 머지되는 PR 안에서 올림. 태그는 사용자(owner) 승인 후에만
 - 목표: P0는 0.0.1 안에 포함(버전 올림 없음), P1 = 0.0.2. **0.1.0 = P13 순번 필드 + P8 HMAC v2 (BREAKING)** [결정]. 0.1.0 전의 비호환 없는 단계는 0.0.x PATCH로 올리고, 0.1.0은 P8과 P13 전용, P3 = 0.0.x PATCH(응답 의미 변경 공지)

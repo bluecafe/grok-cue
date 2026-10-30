@@ -2,7 +2,7 @@
 
 # grok-cue
 
-Current version: `0.2.0` ([VERSION](VERSION), [changelog](CHANGELOG.en.md))
+Current version: `0.2.1` ([VERSION](VERSION), [changelog](CHANGELOG.en.md))
 
 grok-cue is a small, signed "reception desk" between two AI assistant services:
 [Cue](https://cue.im/), the personal-agent app by Manus, and
@@ -110,6 +110,7 @@ Restart the process after changes.
 | `GROK_WEBHOOK_KEY_HEADER` | no | Empty: `Authorization: Bearer <key>`. Set: send the bare key in this header |
 | `CUE_STATE_DB` | no | SQLite path for acceptance, replay, and the outbox. Empty: process memory only. No built-in path |
 | `CUE_OUTBOX_POLL_SECONDS` | no | Outbox poll interval in seconds for this process. Default 5. Values ≤ 0 are rejected. Also pumps once at startup |
+| `CUE_SUMMARY_RETENTION_DAYS` | no | Days before `summary` is removed from `delivered` and `dead` rows. Default 30. Values ≤ 0 are rejected. `queued` and `sending` rows are kept |
 
 `PUBLIC_BASE_URL` (for example `https://hook.example.com`) is read only by docs and check scripts; the app ignores it.
 
@@ -157,7 +158,7 @@ Same `(handoff_id, attempt, report_seq)` + different bytes → `409 sequence_con
 | 202 | `handoff_id`, `status: "received"`, `executed: false`, `forwarded`, `forward_state` | After the acceptance commit, or an idempotent replay |
 | 400 | `invalid_request` + `fields` | Size (over 64 KiB is rejected before auth), content type, JSON, schema |
 | 400 | `task_id_not_allowed` | A `task_id` key anywhere in the body |
-| 400 | `reply_to_not_allowed` + `allowed` | `reply_to` not usable |
+| 400 | `reply_to_not_allowed` | `reply_to` not usable. The allowlist is not in the response |
 | 401 | `unauthorized` | Token, signature, time window, reused signature, or unknown signature version |
 | 409 | `idempotency_conflict` | Same key, different body |
 | 409 | `sequence_conflict` | Same `(handoff_id, attempt, report_seq)`, different body |
@@ -173,6 +174,8 @@ Same `(handoff_id, attempt, report_seq)` + different bytes → `409 sequence_con
 - Keep `.env` at mode `600` and out of version control. Never `source` it into a shell; the check script reads `.env` itself.
 - The 64 KiB body limit is checked before authentication. A large `Content-Length` is rejected immediately, and chunked bodies without a length stop being read as soon as they exceed 64 KiB.
 - The 401 response never says which check failed.
+- `/docs`, `/redoc`, and `/openapi.json` return `404`. The docs UI is not served.
+- Every response includes `Content-Security-Policy: default-src 'none'; frame-ancestors 'none'`. `X-Content-Type-Options: nosniff` is added when it is not already set.
 - Report vulnerabilities as described in [SECURITY.en.md](SECURITY.en.md). Contributions: [CONTRIBUTING.en.md](CONTRIBUTING.en.md).
 
 ## Dependencies

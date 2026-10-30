@@ -5,4 +5,4 @@ first acceptance to Grok through an outbox. It does not run, merge, or deploy
 the reported work.
 """
 
-__version__ = "0.2.0"
+__version__ = "0.2.1"

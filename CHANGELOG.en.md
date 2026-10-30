@@ -2,7 +2,7 @@
 
 # Changelog
 
-The current version is `0.2.0`. The value lives in [`VERSION`](VERSION) at the repository root. The app reads that file only for the FastAPI `version` field. No response body, including `/healthz`, includes the version.
+The current version is `0.2.1`. The value lives in [`VERSION`](VERSION) at the repository root. The app reads that file only for the FastAPI `version` field. No response body, including `/healthz`, includes the version.
 
 ## Version rules
 
@@ -36,6 +36,15 @@ Pre-1.0, and bumped in a SemVer-like way.
 - The 2026-10-29 E2E is one successful request record. Grok-side receipt was confirmed separately by Norn (user) at 16:05 KST.
 - In docs and READMEs the owner is 노른(사용자) in Korean and Norn (user) in English. There was no existing personal-name wording to replace.
 - Versioning was added only in `VERSION`, this changelog, and one README line. Application code was not changed, and no tag was created.
+
+## 0.2.1 — 2026-10-30
+
+PATCH. Fixes from a security review.
+
+- `/docs`, `/redoc`, and `/openapi.json` return `404`. The FastAPI docs UI is not served.
+- A `reply_to` rejection returns only `{"error":"reply_to_not_allowed"}`. The allowlist is not included.
+- Every response sends `Content-Security-Policy: default-src 'none'; frame-ancestors 'none'`. `X-Content-Type-Options: nosniff` is added when it is not already set.
+- After `CUE_SUMMARY_RETENTION_DAYS` (default 30), `summary` is removed from `delivered` and `dead` rows. `queued` and `sending` rows are left as they are. Replay rows are deleted once they are past the signature window (600 seconds).
 
 ## 0.2.0 — 2026-10-30
 

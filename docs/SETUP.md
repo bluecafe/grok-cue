@@ -178,7 +178,7 @@ Caddy를 다시 읽힌 뒤, 80번과 443번 포트가 서버 방화벽에서 열
 
 ## 4. 환경 변수
 
-환경값은 .env 한 곳입니다. 확인 스크립트도 그 파일을 읽습니다. 앱이 읽는 이름은 `app/settings.py`의 열한 개입니다. `PUBLIC_BASE_URL`은 문서와 확인 스크립트만 읽고, 앱은 읽지 않습니다.
+환경값은 .env 한 곳입니다. 확인 스크립트도 그 파일을 읽습니다. 앱이 읽는 이름은 `app/settings.py`의 열두 개입니다. `PUBLIC_BASE_URL`은 문서와 확인 스크립트만 읽고, 앱은 읽지 않습니다.
 
 값을 만들 때는 토큰과 HMAC 키를 서로 다른 값으로 두 번 실행합니다.
 
@@ -204,6 +204,7 @@ GROK_WEBHOOK_KEY_HEADER=
 PUBLIC_BASE_URL=https://hook.example.com
 CUE_STATE_DB=
 CUE_OUTBOX_POLL_SECONDS=5
+CUE_SUMMARY_RETENTION_DAYS=30
 ```
 
 | 변수 | 필요 | 읽는 곳 | 의미 | 예시 |
@@ -219,6 +220,7 @@ CUE_OUTBOX_POLL_SECONDS=5
 | `GROK_WEBHOOK_KEY_HEADER` | 아니오 | 앱 | 비우면 `Authorization: Bearer <GROK_WEBHOOK_KEY>`. 이름을 적으면 그 헤더의 값으로 키만 보냅니다 | 비움, 또는 `X-Grok-Key` |
 | `CUE_STATE_DB` | 아니오 | 앱 | 접수·서명 재생·아웃박스 SQLite 경로. 비우면 프로세스 메모리만 씁니다. 기본 경로는 없습니다 | 비움, 또는 `/var/lib/grok-cue/state.sqlite` |
 | `CUE_OUTBOX_POLL_SECONDS` | 아니오 | 앱 | 이 프로세스의 아웃박스 주기(초). 기본 5. 0 이하는 프로세스가 시작하지 않습니다. 시작 때도 한 번 pump합니다 | `5` |
+| `CUE_SUMMARY_RETENTION_DAYS` | 아니오 | 앱 | `delivered`와 `dead` 행의 `summary`를 지울 때까지의 날 수. 기본 30. 0 이하는 시작하지 않습니다. `queued`와 `sending`은 지우지 않습니다 | `30` |
 | `PUBLIC_BASE_URL` | 확인 스크립트 | 문서 전용 | 확인 스크립트가 부르는 주소. 앱은 읽지 않습니다. 비어 있으면 스크립트가 멈춥니다 | `https://hook.example.com` |
 
 선택 항목은 비어 있으면 꺼진 것과 같습니다. `GROK_WEBHOOK_URL`과 `GROK_WEBHOOK_KEY`를 예시처럼 비워 두면, 파일을 복사해도 Grok으로 넘기지 않습니다. 주소는 코드에 기본값으로 들어 있지 않습니다.
@@ -306,7 +308,7 @@ Grok 루틴은 그 주소에서 POST를 받습니다. `GROK_WEBHOOK_KEY_HEADER`�
 curl -sS -D - https://hook.example.com/healthz
 ```
 
-`200`과 본문 `ok`이면 프로세스가 켜져 있습니다.
+`200`과 본문 `ok`이면 프로세스가 켜져 있습니다. `/docs`, `/redoc`, `/openapi.json`은 `404`입니다. 모든 응답에 `Content-Security-Policy: default-src 'none'; frame-ancestors 'none'`이 있고, `X-Content-Type-Options: nosniff`가 없으면 붙입니다.
 
 ### 확인 스크립트 `scripts/check_bridge.py`
 
@@ -331,7 +333,7 @@ sudo -u bridge .venv/bin/python scripts/check_bridge.py --send     # 전달을 �
 | 보이는 것 | 의미 | 확인 |
 | --- | --- | --- |
 | `401` `unauthorized` | Bearer, HMAC, 시각, 서명 재사용 중 하나가 맞지 않습니다. 어느 쪽인지는 알려 주지 않습니다 | 토큰과 HMAC 키가 서버 `.env`와 같은지 봅니다. `X-Cue-Timestamp`가 서버 시각과 300초 안인지 봅니다. 시계가 어긋나 있으면 맞춥니다. `sha256=`을 붙이지 않습니다. 같은 서명을 다시 보냈다면 시각과 서명만 새로 만듭니다 |
-| `400` `reply_to_not_allowed` | 주소를 받을 수 없습니다. `allowed`는 서버 목록이고, 거절된 주소는 돌려주지 않습니다 | `REPLY_TO_ALLOWLIST`가 비어 있는지, `reply_to`가 그 목록에 있는지, `REPLY_TO_DEFAULT`가 비어 있거나 목록 밖인지 봅니다. `mailto:`와 수신자 여러 개도 거절됩니다. 바꾼 뒤 프로세스를 다시 시작합니다 |
+| `400` `reply_to_not_allowed` | 주소를 받을 수 없습니다. 응답은 사유 코드뿐이고, 허용 목록과 거절된 주소는 돌려주지 않습니다 | `REPLY_TO_ALLOWLIST`가 비어 있는지, `reply_to`가 그 목록에 있는지, `REPLY_TO_DEFAULT`가 비어 있거나 목록 밖인지 봅니다. `mailto:`와 수신자 여러 개도 거절됩니다. 바꾼 뒤 프로세스를 다시 시작합니다 |
 | `400` `invalid_request` | 본문 형식입니다. `fields`에 항목이 있습니다 | `Content-Type`이 `application/json`인지, 본문이 64 KiB 이하인지, [DESIGN.md](DESIGN.md)의 필드 이름과 맞는지 봅니다 |
 | `400` `task_id_not_allowed` | 본문 어딘가에 `task_id`가 있습니다 | 그 키를 빼고 `handoff_id`만 씁니다 |
 | `409` `idempotency_conflict` | 같은 `idempotency_key`로 다른 본문 바이트를 보냈습니다 | 처음 보낸 바이트를 그대로 다시 보냅니다. JSON 키 순서만 바뀌어도 다른 본문입니다. 첫 접수는 그대로 남습니다 |

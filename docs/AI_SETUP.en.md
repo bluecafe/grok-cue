@@ -4,7 +4,7 @@
 
 This document is a procedure for an agent such as Grok Bot or Cue to read on its own and install grok-cue. The human-oriented version is [SETUP.en.md](SETUP.en.md). Addresses, emails, paths, and keys are examples only. Do not run examples verbatim before receiving the user's real values.
 
-All settings live in one `.env` file. The app reads the eleven names in `app/settings.py`. `PUBLIC_BASE_URL` is read only by docs and the check script, never by the app. Response codes and header names follow [README.en.md](../README.en.md); body fields follow [DESIGN.en.md](DESIGN.en.md).
+All settings live in one `.env` file. The app reads the twelve names in `app/settings.py`. `PUBLIC_BASE_URL` is read only by docs and the check script, never by the app. Response codes and header names follow [README.en.md](../README.en.md); body fields follow [DESIGN.en.md](DESIGN.en.md). `/docs`, `/redoc`, and `/openapi.json` return `404`.
 
 ## 0. Inputs to get from the user
 
@@ -162,7 +162,7 @@ openssl rand -hex 32
 python3 -c 'import secrets; print(secrets.token_hex(32))'
 ```
 
-The token and HMAC key must differ. All settings live in one `.env`, without quotes, containing only these names: the eleven the app reads plus the docs-only `PUBLIC_BASE_URL`.
+The token and HMAC key must differ. All settings live in one `.env`, without quotes, containing only these names: the twelve the app reads plus the docs-only `PUBLIC_BASE_URL`.
 
 ```dotenv
 CUE_BRIDGE_TOKEN=replace-with-bearer-token
@@ -177,6 +177,7 @@ GROK_WEBHOOK_KEY_HEADER=
 PUBLIC_BASE_URL=https://hook.example.com
 CUE_STATE_DB=
 CUE_OUTBOX_POLL_SECONDS=5
+CUE_SUMMARY_RETENTION_DAYS=30
 ```
 
 | Variable | Required | Read by | Meaning | Example |
@@ -192,6 +193,7 @@ CUE_OUTBOX_POLL_SECONDS=5
 | `GROK_WEBHOOK_KEY_HEADER` | no | app | Empty: `Authorization: Bearer <GROK_WEBHOOK_KEY>`. Set: bare key in that header | empty, or `X-Grok-Key` |
 | `CUE_STATE_DB` | no | app | SQLite path for acceptance, replay, and the outbox. Empty: process memory only | empty, or `/var/lib/grok-cue/state.sqlite` |
 | `CUE_OUTBOX_POLL_SECONDS` | no | app | Outbox poll interval in seconds. Default 5. Values ≤ 0 stop startup | `5` |
+| `CUE_SUMMARY_RETENTION_DAYS` | no | app | Days before `summary` is removed from `delivered` and `dead` rows. Default 30. Values ≤ 0 stop startup. `queued` and `sending` rows are kept | `30` |
 | `PUBLIC_BASE_URL` | check script | docs only | Address the check script calls. App ignores it. Script stops if empty | `https://hook.example.com` |
 
 `replace-with-` values are placeholders; replace them with values generated on the server. Replace `REPLY_TO_*` with the user's addresses. `PUBLIC_BASE_URL` is the user's public address (`http://127.0.0.1:8160` for local-only checks). Leave the Grok URL and key empty until the user approves forwarding.
@@ -298,7 +300,7 @@ The script generates a fresh test `handoff_id` and `idempotency_key` on every ru
 | Local `/healthz` is `200` but domain fails | Check Caddy name, `reverse_proxy 127.0.0.1:8160`, 80/443, certificate, in that order. Never work around by exposing 8160 |
 | Certificate error | Re-run `dig` to confirm DNS points here. Confirm Caddy is running |
 | Signed POST returns `401` | Clock within 300 s, both Bearer and HMAC present, no `sha256=`, signature not reused. Never print key values |
-| `400` `reply_to_not_allowed` | Allowlist empty, address off-list, or default not on the list. Fix `.env` and restart |
+| `400` `reply_to_not_allowed` | Allowlist empty, address off-list, or default not on the list. The response is only the reason code. Fix `.env` and restart |
 | `400` `invalid_request` | Match `fields` names against [DESIGN.en.md](DESIGN.en.md). Body ≤ 64 KiB, `Content-Type: application/json` |
 | `400` `task_id_not_allowed` | Remove the `task_id` key; keep only `handoff_id` |
 | `409` | Resend the original bytes. Reordered JSON keys are a different body |

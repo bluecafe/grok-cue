@@ -27,6 +27,8 @@
 
 2026-10-30 23:00 KST에 0.2.0을 배포한 뒤 확인했습니다. v1과 버전 헤더가 없는 더미 요청은 둘 다 `401`(`unknown_signature_version`)이었고 아웃박스에는 쌓이지 않았습니다. v2 더미 요청은 `202`, `delivered`, `signature_version=2`였습니다. `healthz`는 `200`이었습니다.
 
+`/docs`, `/redoc`, `/openapi.json`은 `404`입니다. 모든 응답에는 `Content-Security-Policy: default-src 'none'; frame-ancestors 'none'`이 있고, `X-Content-Type-Options: nosniff`가 없으면 붙입니다. `CUE_SUMMARY_RETENTION_DAYS`(기본 30)가 지나면 `delivered`와 `dead` 행의 `summary`를 지웁니다. `queued`와 `sending`은 지우지 않습니다. 서명 재생 행은 서명 유효 시간(600초)이 지나면 삭제합니다.
+
 본문에 없는 키는 거절합니다. `diff`, `patch`, `source`, 파일 본문, 비밀을 넣는 칸은 없습니다. 본문 상한은 64 KiB(65536바이트)입니다. 이 크기는 인증보다 먼저 검사하며, 넘으면 `400 invalid_request`(`fields`는 `body`)입니다.
 
 ## 사람이 맞추는 약속
@@ -105,7 +107,7 @@ Issue 본문에는 목표, 완료 조건, 실행할 테스트, `handoff_id`, `re
 - `REPLY_TO_ALLOWLIST`: 쉼표로 구분합니다. 대소문자는 무시하고, 주소 하나만 정확히 일치해야 합니다. 비우면 목록은 비고, 모든 요청이 `400`입니다(코드상 선택이지만 실제로는 필요).
 - `REPLY_TO_DEFAULT`: `reply_to`를 생략했거나, `null`이거나, 빈 문자열이나 공백만 있을 때 씁니다. 이 값이 비어 있거나 허용 목록에 없으면 `400`입니다.
 - 거절: 목록 밖, 수신자 여러 개, 이메일이 아닌 값, `mailto:`로 시작.
-- 응답: `400` `{"error":"reply_to_not_allowed","allowed":[...]}`. `allowed`는 서버 목록입니다. 거절된 주소는 돌려주지 않습니다.
+- 응답: `400` `{"error":"reply_to_not_allowed"}`. 허용 목록과 거절된 주소는 돌려주지 않습니다.
 - 이 검사는 멱등 저장보다 먼저입니다. 거절된 요청은 키를 차지하지 않습니다.
 
 ## 접수 응답

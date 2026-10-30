@@ -2,7 +2,7 @@
 
 # grok-cue
 
-현재 버전: `0.2.0` ([VERSION](VERSION), [변경 기록](CHANGELOG.md))
+현재 버전: `0.2.1` ([VERSION](VERSION), [변경 기록](CHANGELOG.md))
 
 grok-cue는 두 AI 비서 서비스 사이에 놓이는 작은 "접수 창구" 서버입니다. 하나는 Manus가 만든 개인용 에이전트 앱 [Cue](https://cue.im/)이고, 다른 하나는 클라우드 컴퓨터에서 일하는 xAI의 에이전트 [Grok Bot](https://docs.x.ai/grok-bot/overview)입니다.
 두 비서는 끝낸 일을 서로에게 직접 넘겨줄 방법이 없습니다. grok-cue는 Cue 쪽이 서명해서 보낸 "작업 완료" 알림을 HTTP로 받고, 설정해 두었다면 Grok Bot 웹훅으로 접수한 내용을 JSON으로 넘깁니다.
@@ -104,6 +104,7 @@ Cue가 Bearer와 HMAC 서명 헤더를 붙인 POST를 직접 보낼 수 있는�
 | `GROK_WEBHOOK_KEY_HEADER` | 아니오 | 비우면 `Authorization: Bearer <key>`. 헤더 이름을 적으면 그 헤더에 키 값만 보냄 |
 | `CUE_STATE_DB` | 아니오 | 접수·서명 재생·아웃박스 SQLite 경로. 비우면 프로세스 메모리만 씀. 기본 경로는 없음 |
 | `CUE_OUTBOX_POLL_SECONDS` | 아니오 | 이 프로세스의 아웃박스 주기(초). 기본 5. 0 이하는 거절. 시작 때도 한 번 pump |
+| `CUE_SUMMARY_RETENTION_DAYS` | 아니오 | `delivered`·`dead` 행의 `summary`를 지울 때까지의 날 수. 기본 30. 0 이하는 거절. `queued`와 `sending`은 지우지 않음 |
 
 `PUBLIC_BASE_URL`(예: `https://hook.example.com`)은 문서와 확인 스크립트만 읽고, 앱은 무시합니다.
 
@@ -151,7 +152,7 @@ curl -sS -D - http://127.0.0.1:8160/v1/cue/tasks \
 | 202 | `handoff_id`, `status: "received"`, `executed: false`, `forwarded`, `forward_state` | 접수 커밋 뒤, 또는 같은 요청의 재전송 |
 | 400 | `invalid_request` + `fields` | 크기(64 KiB 초과는 인증보다 먼저 거절), Content-Type, JSON, 스키마 |
 | 400 | `task_id_not_allowed` | 본문 어딘가에 `task_id` 키가 있음 |
-| 400 | `reply_to_not_allowed` + `allowed` | `reply_to`를 쓸 수 없음 |
+| 400 | `reply_to_not_allowed` | `reply_to`를 쓸 수 없음. 허용 목록은 응답에 넣지 않음 |
 | 401 | `unauthorized` | 토큰, 서명, 시각 범위, 서명 재사용, 알 수 없는 서명 버전 |
 | 409 | `idempotency_conflict` | 같은 키, 다른 본문 |
 | 409 | `sequence_conflict` | 같은 `(handoff_id, attempt, report_seq)`, 다른 본문 |
@@ -167,6 +168,8 @@ curl -sS -D - http://127.0.0.1:8160/v1/cue/tasks \
 - `.env`는 권한 `600`으로 두고 버전 관리에 넣지 않습니다. 셸에 `source`하지 마세요. 확인 스크립트는 `.env`를 직접 읽습니다.
 - 본문 크기(64 KiB)는 인증보다 먼저 검사합니다. `Content-Length`가 크면 바로 거절하고, 길이가 없는 chunked 요청도 64 KiB를 넘는 순간 읽기를 멈춥니다.
 - `401` 응답은 어느 검사에서 실패했는지 알려 주지 않습니다.
+- `/docs`, `/redoc`, `/openapi.json`은 `404`입니다. 문서 화면은 제공하지 않습니다.
+- 모든 응답에 `Content-Security-Policy: default-src 'none'; frame-ancestors 'none'`이 있습니다. `X-Content-Type-Options: nosniff`가 없으면 붙입니다.
 - 취약점은 [SECURITY.md](SECURITY.md)의 방법으로 알려 주세요. 기여 방법은 [CONTRIBUTING.md](CONTRIBUTING.md)에 있습니다.
 
 ## 의존성
