@@ -233,10 +233,10 @@ Headers:
 
 - `Authorization: Bearer <CUE_BRIDGE_TOKEN>`
 - `X-Cue-Timestamp`: current Unix seconds, within 300 s of server time
-- `X-Cue-Signature`: HMAC-SHA256 hex (case-insensitive). No `sha256=` prefix. With no version header the input is `{timestamp}.{raw_body}` (v1). `X-Cue-Signature-Version: 2` joins `v2`, METHOD, PATH, timestamp, and the raw body with newlines. Any other version is `401`. v1 is still accepted. A verified acceptance logs and stores only `signature_version` `1` or `2`. The signature string is not logged
+- `X-Cue-Signature`: HMAC-SHA256 hex (case-insensitive). No `sha256=` prefix. `X-Cue-Signature-Version: 2` is required. The input joins `v2`, METHOD, PATH, timestamp, and the raw body with newlines. A missing header, `1`, or any other value is `401` `{"error":"unauthorized"}`. The response contains no signature and no secret. A verified acceptance logs and stores only `signature_version=2`
 - `Content-Type: application/json`
 
-There is exactly one dot between the timestamp string and the body bytes. Re-serializing the JSON changes the bytes and breaks the signature, so keep the original bytes.
+The signature joins `v2`, METHOD, PATH, timestamp, and the body bytes with newlines. Re-serializing the JSON changes the bytes and breaks the signature, so keep the original bytes.
 
 When retrying:
 
@@ -274,7 +274,7 @@ For every request the sender must:
 
 1. Build the JSON body bytes once and keep them.
 2. Put the current Unix seconds in `X-Cue-Timestamp`.
-3. With no version header, put the HMAC-SHA256 hex of `{timestamp}.{body bytes}` in `X-Cue-Signature`. v2 sends `X-Cue-Signature-Version: 2` and signs `v2`, METHOD, PATH, timestamp, and the body bytes joined by newlines.
+3. Send `X-Cue-Signature-Version: 2` and put the HMAC-SHA256 hex of `v2`, METHOD, PATH, timestamp, and the body bytes joined by newlines in `X-Cue-Signature`.
 4. POST with `Authorization` and `Content-Type: application/json`.
 
 [`scripts/check_bridge.py`](../scripts/check_bridge.py) is the **reference sender** that implements exactly these steps (section 6). The default is a dry run and sends nothing. A real send requires explicit `--send`. A test request can cause a real delivery to Grok Bot. The 2026-10-29 check is one request from the current Cue environment. Where Cue cannot send the request itself, send it the same way this script does.

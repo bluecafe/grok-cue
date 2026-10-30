@@ -22,11 +22,11 @@ from tests.support import FIXED_NOW, HMAC_KEY, TOKEN, sign, sign_v2
 
 class RecordingNotifier:
     def __init__(self) -> None:
-        self.events: list[tuple[str, str, str]] = []
+        self.events: list[tuple[str, str, str, int]] = []
         self._log = LogNotifier()
 
     def accepted(self, handoff_id: str, repo: str, reply_to: str, signature_version: int) -> None:
-        self.events.append((handoff_id, repo, reply_to))
+        self.events.append((handoff_id, repo, reply_to, signature_version))
         self._log.accepted(handoff_id, repo, reply_to, signature_version)
 
 
@@ -61,6 +61,7 @@ class Harness:
         hmac_key: str | None = None,
         signature: str | None = None,
         signature_version: str | None = None,
+        omit_version: bool = False,
         sign_method: str = "POST",
         sign_path: str = "/v1/cue/tasks",
         content_type: str | None = "application/json",
@@ -68,9 +69,10 @@ class Harness:
     ):
         ts_value = str(int(self.now) if timestamp is None else timestamp)
         key = self.settings.cue_bridge_hmac_key if hmac_key is None else hmac_key
+        version_header = "2" if signature_version is None else signature_version
         if signature is not None:
             sig = signature
-        elif signature_version is not None and signature_version.strip() == "2":
+        elif version_header.strip() == "2":
             sig = sign_v2(key, sign_method, sign_path, ts_value, body)
         else:
             sig = sign(key, ts_value, body)
@@ -79,8 +81,8 @@ class Harness:
             "X-Cue-Timestamp": ts_value,
             "X-Cue-Signature": sig,
         }
-        if signature_version is not None:
-            headers["X-Cue-Signature-Version"] = signature_version
+        if not omit_version:
+            headers["X-Cue-Signature-Version"] = version_header
         if content_type is not None:
             headers["Content-Type"] = content_type
         for name in drop:

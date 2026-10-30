@@ -63,8 +63,9 @@ def test_body(handoff_id: str, idempotency_key: str, summary: str) -> bytes:
 
 
 def sign(key: str, timestamp: str, raw: bytes) -> str:
-    """v1 signature. A request with no version header is still accepted."""
-    return hmac.new(key.encode("utf-8"), timestamp.encode("ascii") + b"." + raw, hashlib.sha256).hexdigest()
+    """Version-2 signature over method, path, timestamp, and the raw body."""
+    prefix = f"v2\nPOST\n/v1/cue/tasks\n{timestamp}\n".encode("utf-8")
+    return hmac.new(key.encode("utf-8"), prefix + raw, hashlib.sha256).hexdigest()
 
 
 def signed_headers(token: str, key: str, raw: bytes, offset: int = 0) -> dict[str, str]:
@@ -73,6 +74,7 @@ def signed_headers(token: str, key: str, raw: bytes, offset: int = 0) -> dict[st
         "Authorization": f"Bearer {token}",
         "X-Cue-Timestamp": timestamp,
         "X-Cue-Signature": sign(key, timestamp, raw),
+        "X-Cue-Signature-Version": "2",
         "Content-Type": "application/json",
     }
 

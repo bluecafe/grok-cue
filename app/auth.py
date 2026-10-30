@@ -1,4 +1,4 @@
-"""Bearer plus HMAC-SHA256. No version header is v1; version 2 binds method and path."""
+"""Bearer plus HMAC-SHA256 version 2. The signature binds method and path."""
 
 from __future__ import annotations
 
@@ -12,24 +12,17 @@ SKEW_SECONDS = 300
 REPLAY_TTL_SECONDS = 600
 
 
-def hmac_sha256_hex(key: str, timestamp: str, raw_body: bytes) -> str:
-    """v1: hex(HMAC-SHA256(key, timestamp + "." + raw_body))."""
-    message = timestamp.encode("ascii") + b"." + raw_body
-    return hmac.new(key.encode("utf-8"), message, hashlib.sha256).hexdigest()
-
-
 def hmac_v2_hex(key: str, method: str, path: str, timestamp: str, raw_body: bytes) -> str:
-    """v2: hex(HMAC-SHA256(key, "v2\\n" + METHOD + "\\n" + PATH + "\\n" + ts + "\\n" + raw_body))."""
+    """hex(HMAC-SHA256(key, "v2\\n" + METHOD + "\\n" + PATH + "\\n" + ts + "\\n" + raw_body))."""
     prefix = f"v2\n{method}\n{path}\n{timestamp}\n".encode("utf-8")
     return hmac.new(key.encode("utf-8"), prefix + raw_body, hashlib.sha256).hexdigest()
 
 
 def parse_signature_version(header: str | None) -> int | None:
-    """Missing header is v1. ``2`` is v2. Any other value is unknown."""
+    """Only ``2`` is accepted. A missing header, ``1``, or any other value is rejected."""
     if header is None:
-        return 1
-    value = header.strip()
-    if value == "2":
+        return None
+    if header.strip() == "2":
         return 2
     return None
 
@@ -82,19 +75,14 @@ def signature_matches(
     timestamp: str,
     raw_body: bytes,
     *,
-    version: int = 1,
-    method: str = "",
-    path: str = "",
+    method: str,
+    path: str,
 ) -> bool:
+    """Verify a version-2 signature. Callers reject every other version first."""
     candidate = (provided or "").strip().lower()
     ok = False
     for key in keys:
-        if version == 1:
-            expected = hmac_sha256_hex(key, timestamp, raw_body)
-        elif version == 2:
-            expected = hmac_v2_hex(key, method, path, timestamp, raw_body)
-        else:
-            return False
+        expected = hmac_v2_hex(key, method, path, timestamp, raw_body)
         ok = _digest_equal(candidate, expected) or ok
     return ok
 

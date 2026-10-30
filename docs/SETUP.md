@@ -233,10 +233,10 @@ Cue는 `POST https://hook.example.com/v1/cue/tasks`로 JSON을 보냅니다. 로
 
 - `Authorization: Bearer <CUE_BRIDGE_TOKEN>`
 - `X-Cue-Timestamp`: 지금 Unix 초. 서버 시각과 300초 안이어야 합니다
-- `X-Cue-Signature`: HMAC-SHA256 hex(대소문자 구분 없음). `sha256=`은 붙이지 않습니다. 버전 헤더가 없으면 입력은 `{timestamp}.{raw_body}`(v1)입니다. `X-Cue-Signature-Version: 2`이면 입력은 `v2`, METHOD, PATH, timestamp, raw_body를 줄바꿈으로 이은 값입니다. 그 밖의 버전은 `401`입니다. v1은 아직 받습니다. 검증을 통과해 접수되면 로그와 접수 행에 `signature_version` `1` 또는 `2`만 남습니다. 서명 문자열은 로그에 넣지 않습니다
+- `X-Cue-Signature`: HMAC-SHA256 hex(대소문자 구분 없음). `sha256=`은 붙이지 않습니다. `X-Cue-Signature-Version: 2`가 필요합니다. 입력은 `v2`, METHOD, PATH, timestamp, raw_body를 줄바꿈으로 이은 값입니다. 헤더가 없거나 `1`이거나 그 밖의 값이면 `401` `{"error":"unauthorized"}`입니다. 응답에 서명이나 비밀을 넣지 않습니다. 검증을 통과해 접수되면 로그와 접수 행에 `signature_version=2`만 남습니다
 - `Content-Type: application/json`
 
-서명의 점은 타임스탬프 문자열과 본문 바이트 사이에 하나만 있습니다. 본문을 다시 JSON으로 만들면 바이트가 달라져 서명이 맞지 않습니다. 처음 보낸 바이트를 보관합니다.
+서명은 `v2`, METHOD, PATH, timestamp, 본문 바이트를 줄바꿈으로 잇습니다. 본문을 다시 JSON으로 만들면 바이트가 달라져 서명이 맞지 않습니다. 처음 보낸 바이트를 보관합니다.
 
 다시 보낼 때:
 
@@ -274,7 +274,7 @@ Cue 쪽 흐름:
 
 1. 본문 JSON 바이트를 한 번 만들고 보관합니다.
 2. 현재 Unix 초를 `X-Cue-Timestamp`에 넣습니다.
-3. 버전 헤더가 없으면 `{timestamp}.{본문 바이트}`의 HMAC-SHA256 hex를 `X-Cue-Signature`에 넣습니다. v2는 `X-Cue-Signature-Version: 2`와 함께 `v2`, METHOD, PATH, timestamp, 본문 바이트를 줄바꿈으로 잇습니다.
+3. `X-Cue-Signature-Version: 2`와 함께 `v2`, METHOD, PATH, timestamp, 본문 바이트를 줄바꿈으로 이은 HMAC-SHA256 hex를 `X-Cue-Signature`에 넣습니다.
 4. `Authorization`, `Content-Type: application/json`과 함께 POST합니다.
 
 이 순서를 그대로 구현한 **참고용 송신기**가 [`scripts/check_bridge.py`](../scripts/check_bridge.py)입니다(6절). 기본은 dry-run이라 아무것도 보내지 않습니다. 실제로 보내려면 `--send`가 필요합니다. 시험 요청은 Grok Bot에 실제 전달을 일으킬 수 있습니다. 2026-10-29 확인은 현재 Cue 환경의 한 건입니다. 다른 환경에서 Cue가 이 요청을 직접 보내지 못하면, 이 스크립트와 같은 방식으로 보냅니다.

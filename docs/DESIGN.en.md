@@ -112,6 +112,6 @@ Reply addresses are set only via environment variables. No address is hard-coded
 {"handoff_id":"<uuid>","status":"received","executed":false,"forwarded":false,"forward_state":"queued"}
 ```
 
-For the same key and the same body, `handoff_id`, `status`, and `executed` match the first acceptance. `forwarded` and `forward_state` are the outbox state at that moment. Logs never contain tokens, HMAC keys, the Grok key, signatures, bodies, or summaries. A verified acceptance logs and stores only `signature_version=1` or `2`.
+For the same key and the same body, `handoff_id`, `status`, and `executed` match the first acceptance. `forwarded` and `forward_state` are the outbox state at that moment. Logs never contain tokens, HMAC keys, the Grok key, signatures, bodies, or summaries. A verified acceptance logs and stores only `signature_version=2`. Without `X-Cue-Signature-Version: 2` the response is `401`.
 
 Order is lexicographic on `(attempt, report_seq)`. A report older than the stored generation is recorded only: the current generation stays, and that report is not forwarded. A different body for the same `(handoff_id, attempt, report_seq)` returns `409` `{"error":"sequence_conflict"}` and leaves the first acceptance in place. A different body for the same `idempotency_key` is still `409` `{"error":"idempotency_conflict"}`.

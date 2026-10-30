@@ -2,7 +2,7 @@
 
 # Changelog
 
-The current version is `0.1.1`. The value lives in [`VERSION`](VERSION) at the repository root. The app reads that file only for the FastAPI `version` field. No response body, including `/healthz`, includes the version.
+The current version is `0.2.0`. The value lives in [`VERSION`](VERSION) at the repository root. The app reads that file only for the FastAPI `version` field. No response body, including `/healthz`, includes the version.
 
 ## Version rules
 
@@ -32,6 +32,20 @@ Pre-1.0, and bumped in a SemVer-like way.
 - The 2026-10-29 E2E is one successful request record. Grok-side receipt was confirmed separately by Norn (user) at 16:05 KST.
 - In docs and READMEs the owner is 노른(사용자) in Korean and Norn (user) in English. There was no existing personal-name wording to replace.
 - Versioning was added only in `VERSION`, this changelog, and one README line. Application code was not changed, and no tag was created.
+
+## 0.2.0 — 2026-10-30
+
+MINOR and **BREAKING**. HMAC v1 is rejected.
+
+### Breaking changes
+
+- A missing `X-Cue-Signature-Version` header, or the value `1`, returns `401` `{"error":"unauthorized"}`. The response body contains no signature and no secret. Only `2` is accepted.
+- The verification path computes only the v2 input (`v2`, METHOD, PATH, timestamp, raw_body).
+
+### Features
+
+- A verified acceptance logs and stores only `signature_version=2`.
+- Adding the `signature_version` column runs in one transaction. If that migration fails, the response is `503 storage_unavailable`.
 
 ## 0.1.1 — 2026-10-30
 

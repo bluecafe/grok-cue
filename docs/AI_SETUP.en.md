@@ -65,7 +65,7 @@ Signing:
 
 - `Authorization: Bearer <CUE_BRIDGE_TOKEN>`
 - `X-Cue-Timestamp`: Unix seconds, within ±300 s of server time
-- `X-Cue-Signature`: HMAC-SHA256 hex (case-insensitive). With no version header the input is `{timestamp}.{raw_body}`. `X-Cue-Signature-Version: 2` joins `v2`, METHOD, PATH, timestamp, and raw_body with newlines. No `sha256=` prefix. Any other version is 401. v1 is still accepted. A verified acceptance logs and stores only `signature_version` `1` or `2`. The signature string is not logged
+- `X-Cue-Signature`: HMAC-SHA256 hex (case-insensitive). `X-Cue-Signature-Version: 2` is required. The input joins `v2`, METHOD, PATH, timestamp, and raw_body with newlines. No `sha256=` prefix. A missing header, `1`, or any other value is `401` `{"error":"unauthorized"}`. The response contains no signature and no secret. A verified acceptance logs and stores only `signature_version=2`
 - `Content-Type: application/json`
 - Key is `CUE_BRIDGE_HMAC_KEY`; during rotation the secondary is also accepted
 - Both Bearer and HMAC must match
