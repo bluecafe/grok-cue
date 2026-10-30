@@ -2,14 +2,29 @@
 
 from __future__ import annotations
 
+import logging
 import os
+import time
+from collections.abc import Callable
 from pathlib import Path
 
 import httpx2 as httpx
+import pytest
 
 from app.outbox import BUDGET_SECONDS
 from tests.support import FIXED_NOW, task_body
 from tests.test_forward import Capture, _harness
+
+
+def wait_until(predicate: Callable[[], bool], timeout: float = 2.0) -> None:
+    """Poll until predicate is true, or fail when timeout elapses."""
+    deadline = time.monotonic() + timeout
+    while True:
+        if predicate():
+            return
+        if time.monotonic() >= deadline:
+            raise AssertionError("timed out waiting for condition")
+        time.sleep(0.01)
 
 
 def test_first_202_is_queued() -> None:
@@ -223,12 +238,9 @@ def test_retry_runs_as_time_passes_without_a_new_request(tmp_path: Path) -> None
         lifespan=True,
     )
     harness.post(task_body(idempotency_key="idem-worker"))
-    assert len(capture.requests) == 1
+    wait_until(lambda: len(capture.requests) == 1)
     clock["now"] = float(FIXED_NOW) + 60
-    import time
-
-    time.sleep(0.25)
-    assert len(capture.requests) == 2
+    wait_until(lambda: len(capture.requests) == 2)
     harness.close()
 
 
@@ -249,8 +261,8 @@ def test_startup_pump_recovers_sending_and_due_rows(tmp_path: Path) -> None:
         clock=lambda: float(FIXED_NOW),
         lifespan=True,
     )
-    assert len(recovered.requests) == 1
-    assert started.outbox.snapshot("idem-stale-sending")["state"] == "delivered"
+    wait_until(lambda: len(recovered.requests) == 1)
+    wait_until(lambda: started.outbox.snapshot("idem-stale-sending")["state"] == "delivered")
     started.close()
 
     due_capture = Capture(status=503)
@@ -268,9 +280,42 @@ def test_startup_pump_recovers_sending_and_due_rows(tmp_path: Path) -> None:
         clock=lambda: float(FIXED_NOW) + 60,
         lifespan=True,
     )
-    assert len(resumed.requests) == 1
-    assert resumed_app.outbox.snapshot("idem-due")["state"] == "delivered"
+    wait_until(lambda: len(resumed.requests) == 1)
+    wait_until(lambda: resumed_app.outbox.snapshot("idem-due")["state"] == "delivered")
     resumed_app.close()
+
+
+def test_worker_delivers_on_the_cycle_after_pump_raises(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.INFO, logger="grok_cue")
+    database = str(tmp_path / "state.sqlite")
+    capture = Capture(status=204)
+    harness = _harness(
+        capture,
+        state_db=database,
+        jitter=lambda: 1.0,
+        poll_seconds=0.05,
+        auto_pump=False,
+        lifespan=True,
+    )
+    original = harness.forwarder.attempt
+    raised = {"done": False}
+
+    async def attempt(payload):
+        if not raised["done"]:
+            raised["done"] = True
+            raise RuntimeError("boom-secret")
+        return await original(payload)
+
+    harness.forwarder.attempt = attempt
+    harness.post(task_body(idempotency_key="idem-recover-worker"))
+    wait_until(lambda: harness.outbox.snapshot("idem-recover-worker")["state"] == "delivered")
+    assert len(capture.requests) == 1
+    assert "class=RuntimeError" in caplog.text
+    assert "boom-secret" not in caplog.text
+    harness.close()
 
 
 def test_concurrent_pump_does_not_double_send(tmp_path: Path) -> None:

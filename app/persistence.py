@@ -339,6 +339,7 @@ class StateDB:
         jitter: float | None = None,
     ) -> None:
         async with self._pump_lock:
+            self.recover_sending()
             factor = jitter_factor() if jitter is None else jitter
             for job in self.claim_due(now):
                 result = await forwarder.attempt(job.payload)

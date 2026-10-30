@@ -34,7 +34,7 @@ PATCH. `0.1.0` is reserved for P8 and P13. The first `202` now has `forwarded: f
 
 - The outbox and `forward_state` share the SQLite file used for acceptance and replay. The file mode is `0600`. If the database cannot be opened, the log is `state_db=unavailable` with no path and no body, and the response is `503`.
 - `forwarded: true` only after a Grok 2xx. Sending the same body again does not start another delivery. Only timeouts, connection errors, 408, 425, 429, and 5xx are retried.
-- Retries and restart recovery run on an in-process worker. It pumps once at startup, then every `CUE_OUTBOX_POLL_SECONDS` (default 5) using the wall clock, and it is cancelled on shutdown. Rows left in `sending` and rows that are due are recovered before they are sent. A row is claimed atomically before send so the same row is not sent twice.
+- Retries and restart recovery run on an in-process worker. It pumps once at startup, then every `CUE_OUTBOX_POLL_SECONDS` (default 5) using the wall clock, and it is cancelled on shutdown. If one pump raises, the worker keeps going and the log records only the exception class name. Rows left in `sending` and rows that are due are recovered before they are sent. A row is claimed atomically before send so the same row is not sent twice.
 
 ## 0.0.3 — 2026-10-30
 

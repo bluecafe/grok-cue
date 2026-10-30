@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import random
 import threading
 from dataclasses import dataclass
 
 from app.forward import AttemptResult, GrokForwarder
+
+logger = logging.getLogger("grok_cue")
 
 MAX_ATTEMPTS = 7
 BUDGET_SECONDS = 60 * 60
@@ -134,6 +137,7 @@ class MemoryOutbox:
         jitter: float | None = None,
     ) -> None:
         async with self._pump_lock:
+            self.recover_sending()
             factor = jitter_factor() if jitter is None else jitter
             for job in self.claim_due(now):
                 result = await forwarder.attempt(job.payload)
@@ -147,15 +151,22 @@ async def run_outbox_worker(bridge: object, stop: asyncio.Event) -> None:
     if recover is not None:
         recover()
     while not stop.is_set():
-        await bridge.outbox.pump(  # type: ignore[attr-defined]
-            bridge.forwarder,  # type: ignore[attr-defined]
-            bridge.clock(),  # type: ignore[attr-defined]
-            bridge.jitter(),  # type: ignore[attr-defined]
-        )
+        try:
+            await bridge.outbox.pump(  # type: ignore[attr-defined]
+                bridge.forwarder,  # type: ignore[attr-defined]
+                bridge.clock(),  # type: ignore[attr-defined]
+                bridge.jitter(),  # type: ignore[attr-defined]
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.info("outbox worker error class=%s", type(exc).__name__)
         try:
             await asyncio.wait_for(stop.wait(), timeout=interval)
         except TimeoutError:
             continue
+        except asyncio.CancelledError:
+            raise
 
 
 def _job(row: dict) -> OutboxJob:
