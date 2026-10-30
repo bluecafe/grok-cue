@@ -3,14 +3,77 @@
 from __future__ import annotations
 
 import sqlite3
+import time
 from pathlib import Path
 
 from app.auth import REPLAY_TTL_SECONDS, ReplayCache
+from app.persistence import StateDB
 from tests.support import FIXED_NOW, HMAC_KEY, HANDOFF_ID, sign_v2, task_body
 from tests.test_forward import Capture, _harness
 
 SUMMARY = "summary-should-expire"
 RETENTION = 30 * 86400
+
+
+def test_finished_at_backfill_does_not_use_unixepoch(tmp_path: Path) -> None:
+    database = tmp_path / "state.sqlite"
+    conn = sqlite3.connect(database)
+    conn.execute(
+        """
+        CREATE TABLE outbox (
+            idempotency_key TEXT PRIMARY KEY,
+            handoff_id TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            state TEXT NOT NULL,
+            attempts INTEGER NOT NULL,
+            first_attempt_at REAL,
+            next_attempt_at REAL,
+            run INTEGER NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO outbox (
+            idempotency_key, handoff_id, payload_json, state, attempts,
+            first_attempt_at, next_attempt_at, run
+        ) VALUES (?, ?, ?, 'delivered', 1, NULL, NULL, 1)
+        """,
+        ("idem-now", "handoff", '{"summary":"x"}'),
+    )
+    conn.execute(
+        """
+        INSERT INTO outbox (
+            idempotency_key, handoff_id, payload_json, state, attempts,
+            first_attempt_at, next_attempt_at, run
+        ) VALUES (?, ?, ?, 'delivered', 1, 100, NULL, 1)
+        """,
+        ("idem-kept", "handoff", '{"summary":"x"}'),
+    )
+    conn.execute(
+        """
+        INSERT INTO outbox (
+            idempotency_key, handoff_id, payload_json, state, attempts,
+            first_attempt_at, next_attempt_at, run
+        ) VALUES (?, ?, ?, 'queued', 0, NULL, NULL, 1)
+        """,
+        ("idem-queued", "handoff", '{"summary":"x"}'),
+    )
+    conn.commit()
+    conn.close()
+    source = (Path(__file__).resolve().parent.parent / "app" / "persistence.py").read_text(encoding="utf-8")
+    assert "unixepoch(" not in source
+    assert "CAST(strftime('%s','now') AS INTEGER)" in source
+    before = time.time()
+    opened = StateDB(str(database))
+    after = time.time()
+    assert opened._conn is not None
+    seen = sqlite3.connect(database)
+    rows = dict(seen.execute("SELECT idempotency_key, finished_at FROM outbox"))
+    seen.close()
+    assert before - 2 <= float(rows["idem-now"]) <= after + 2
+    assert rows["idem-kept"] == 100
+    assert rows["idem-queued"] is None
 
 
 def _age_finished_at(path: str) -> None:

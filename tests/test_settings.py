@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
+from app.main import create_app
 from app.settings import Settings
 
 
@@ -30,9 +31,15 @@ def test_summary_retention_defaults_to_thirty_days(monkeypatch: pytest.MonkeyPat
     assert blank.cue_summary_retention_days == 30
 
 
-def test_summary_retention_rejects_non_positive(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("raw", ["nan", "NaN", "inf", "Infinity", "-inf", "0", "-1", "0.0"])
+def test_summary_retention_rejects_non_finite_and_non_positive(
+    monkeypatch: pytest.MonkeyPatch,
+    raw: str,
+) -> None:
     monkeypatch.setenv("CUE_BRIDGE_TOKEN", "token-a")
     monkeypatch.setenv("CUE_BRIDGE_HMAC_KEY", "hmac-a")
-    monkeypatch.setenv("CUE_SUMMARY_RETENTION_DAYS", "0")
+    monkeypatch.setenv("CUE_SUMMARY_RETENTION_DAYS", raw)
     with pytest.raises(ValidationError):
         Settings(_env_file=None)
+    with pytest.raises(ValidationError):
+        create_app()

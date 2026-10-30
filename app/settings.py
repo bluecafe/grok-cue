@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -56,7 +58,7 @@ class Settings(BaseSettings):
     @field_validator("cue_summary_retention_days")
     @classmethod
     def retention_is_positive(cls, value: float) -> float:
-        if value <= 0:
+        if not math.isfinite(value) or value <= 0:
             raise ValueError("CUE_SUMMARY_RETENTION_DAYS")
         return value
 

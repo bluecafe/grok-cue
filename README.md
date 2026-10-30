@@ -104,7 +104,7 @@ Cue가 Bearer와 HMAC 서명 헤더를 붙인 POST를 직접 보낼 수 있는�
 | `GROK_WEBHOOK_KEY_HEADER` | 아니오 | 비우면 `Authorization: Bearer <key>`. 헤더 이름을 적으면 그 헤더에 키 값만 보냄 |
 | `CUE_STATE_DB` | 아니오 | 접수·서명 재생·아웃박스 SQLite 경로. 비우면 프로세스 메모리만 씀. 기본 경로는 없음 |
 | `CUE_OUTBOX_POLL_SECONDS` | 아니오 | 이 프로세스의 아웃박스 주기(초). 기본 5. 0 이하는 거절. 시작 때도 한 번 pump |
-| `CUE_SUMMARY_RETENTION_DAYS` | 아니오 | `delivered`·`dead` 행의 `summary`를 지울 때까지의 날 수. 기본 30. 0 이하는 거절. `queued`와 `sending`은 지우지 않음 |
+| `CUE_SUMMARY_RETENTION_DAYS` | 아니오 | `delivered`·`dead` 행의 `summary`를 지울 때까지의 날 수. 기본 30. 유한한 양수만 받음. `nan`, `inf`, 0, 음수는 시작할 때 거절. `queued`와 `sending`은 지우지 않음 |
 
 `PUBLIC_BASE_URL`(예: `https://hook.example.com`)은 문서와 확인 스크립트만 읽고, 앱은 무시합니다.
 

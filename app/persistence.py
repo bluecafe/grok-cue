@@ -552,7 +552,7 @@ class StateDB:
                 conn.execute(
                     """
                     UPDATE outbox
-                    SET finished_at = COALESCE(first_attempt_at, unixepoch())
+                    SET finished_at = COALESCE(first_attempt_at, CAST(strftime('%s','now') AS INTEGER))
                     WHERE state IN ('delivered', 'dead') AND finished_at IS NULL
                     """
                 )

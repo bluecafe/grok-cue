@@ -220,7 +220,7 @@ CUE_SUMMARY_RETENTION_DAYS=30
 | `GROK_WEBHOOK_KEY_HEADER` | no | app | Empty: `Authorization: Bearer <GROK_WEBHOOK_KEY>`. Set: the bare key in that header | empty, or `X-Grok-Key` |
 | `CUE_STATE_DB` | no | app | SQLite path for acceptance, replay, and the outbox. Empty: process memory only. No built-in path | empty, or `/var/lib/grok-cue/state.sqlite` |
 | `CUE_OUTBOX_POLL_SECONDS` | no | app | Outbox poll interval in seconds for this process. Default 5. Values ≤ 0 stop startup. Also pumps once at startup | `5` |
-| `CUE_SUMMARY_RETENTION_DAYS` | no | app | Days before `summary` is removed from `delivered` and `dead` rows. Default 30. Values ≤ 0 stop startup. `queued` and `sending` rows are kept | `30` |
+| `CUE_SUMMARY_RETENTION_DAYS` | no | app | Days before `summary` is removed from `delivered` and `dead` rows. Default 30. Must be a finite positive number. `nan`, `inf`, 0, and negative values are rejected at startup. `queued` and `sending` rows are kept | `30` |
 | `PUBLIC_BASE_URL` | check script | docs only | Address the check script calls. The app ignores it. The script stops if empty | `https://hook.example.com` |
 
 Empty optional values mean "off". With `GROK_WEBHOOK_URL` and `GROK_WEBHOOK_KEY` left empty as in the example, copying the file does not forward anything. No address is hard-coded.

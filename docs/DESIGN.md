@@ -27,7 +27,7 @@
 
 2026-10-30 23:00 KST에 0.2.0을 배포한 뒤 확인했습니다. v1과 버전 헤더가 없는 더미 요청은 둘 다 `401`(`unknown_signature_version`)이었고 아웃박스에는 쌓이지 않았습니다. v2 더미 요청은 `202`, `delivered`, `signature_version=2`였습니다. `healthz`는 `200`이었습니다.
 
-`/docs`, `/redoc`, `/openapi.json`은 `404`입니다. 모든 응답에는 `Content-Security-Policy: default-src 'none'; frame-ancestors 'none'`이 있고, `X-Content-Type-Options: nosniff`가 없으면 붙입니다. `CUE_SUMMARY_RETENTION_DAYS`(기본 30)가 지나면 `delivered`와 `dead` 행의 `summary`를 지웁니다. `queued`와 `sending`은 지우지 않습니다. 서명 재생 행은 서명 유효 시간(600초)이 지나면 삭제합니다.
+`/docs`, `/redoc`, `/openapi.json`은 `404`입니다. 모든 응답에는 `Content-Security-Policy: default-src 'none'; frame-ancestors 'none'`이 있고, `X-Content-Type-Options: nosniff`가 없으면 붙입니다. `CUE_SUMMARY_RETENTION_DAYS`(기본 30, 유한한 양수. `nan`, `inf`, 0, 음수는 시작할 때 거절)가 지나면 `delivered`와 `dead` 행의 `summary`를 지웁니다. `queued`와 `sending`은 지우지 않습니다. 서명 재생 행은 서명 유효 시간(600초)이 지나면 삭제합니다.
 
 본문에 없는 키는 거절합니다. `diff`, `patch`, `source`, 파일 본문, 비밀을 넣는 칸은 없습니다. 본문 상한은 64 KiB(65536바이트)입니다. 이 크기는 인증보다 먼저 검사하며, 넘으면 `400 invalid_request`(`fields`는 `body`)입니다.
 

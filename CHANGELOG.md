@@ -45,6 +45,8 @@ PATCH. 보안 점검에서 나온 수정입니다.
 - `reply_to` 거절 응답은 `{"error":"reply_to_not_allowed"}`만 돌려줍니다. 허용 메일 목록은 넣지 않습니다.
 - 모든 응답에 `Content-Security-Policy: default-src 'none'; frame-ancestors 'none'`을 붙입니다. `X-Content-Type-Options: nosniff`가 없으면 붙입니다.
 - `CUE_SUMMARY_RETENTION_DAYS`(기본 30)가 지나면 `delivered`와 `dead` 행의 `summary`를 지웁니다. `queued`와 `sending`은 그대로 둡니다. 서명 재생 행은 서명 유효 시간(600초)이 지나면 삭제합니다.
+- 예전 데이터베이스에 `finished_at`을 채울 때 `unixepoch()` 대신 `CAST(strftime('%s','now') AS INTEGER)`를 씁니다. SQLite 버전에 기대지 않습니다.
+- `CUE_SUMMARY_RETENTION_DAYS`는 유한한 양수여야 합니다. `nan`, `inf`, 0, 음수는 시작할 때 거절합니다.
 
 ## 0.2.0 — 2026-10-30
 
