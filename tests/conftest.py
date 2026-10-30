@@ -25,9 +25,9 @@ class RecordingNotifier:
         self.events: list[tuple[str, str, str]] = []
         self._log = LogNotifier()
 
-    def accepted(self, handoff_id: str, repo: str, reply_to: str) -> None:
+    def accepted(self, handoff_id: str, repo: str, reply_to: str, signature_version: int) -> None:
         self.events.append((handoff_id, repo, reply_to))
-        self._log.accepted(handoff_id, repo, reply_to)
+        self._log.accepted(handoff_id, repo, reply_to, signature_version)
 
 
 class Harness:

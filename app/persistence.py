@@ -62,7 +62,8 @@ class StateDB:
                 CREATE TABLE IF NOT EXISTS idempotency (
                     idempotency_key TEXT PRIMARY KEY,
                     body_sha256 TEXT NOT NULL,
-                    response_json TEXT NOT NULL
+                    response_json TEXT NOT NULL,
+                    signature_version INTEGER
                 )
                 """
             )
@@ -129,6 +130,7 @@ class StateDB:
                 WHERE state = 'sending'
                 """
             )
+            self._add_signature_version_column(conn)
             self._conn = conn
             self._restrict(path)
         except (OSError, sqlite3.Error):
@@ -173,6 +175,7 @@ class StateDB:
         handoff_id: str,
         attempt: int,
         report_seq: int,
+        signature_version: int,
         forward_payload: dict | None,
         forwarding: bool,
     ) -> RegisterResult:
@@ -223,8 +226,12 @@ class StateDB:
                         self._safe_rollback(conn)
                         raise StorageUnavailable
                     conn.execute(
-                        "INSERT INTO idempotency (idempotency_key, body_sha256, response_json) VALUES (?, ?, ?)",
-                        (key, digest, original[0]),
+                        """
+                        INSERT INTO idempotency (
+                            idempotency_key, body_sha256, response_json, signature_version
+                        ) VALUES (?, ?, ?, ?)
+                        """,
+                        (key, digest, original[0], signature_version),
                     )
                     self._commit(conn)
                     stored = json.loads(original[0])
@@ -233,8 +240,12 @@ class StateDB:
                     return RegisterResult(response=stored, created=False, enqueue=False)
                 payload = json.dumps(response, separators=(",", ":"), sort_keys=True)
                 conn.execute(
-                    "INSERT INTO idempotency (idempotency_key, body_sha256, response_json) VALUES (?, ?, ?)",
-                    (key, digest, payload),
+                    """
+                    INSERT INTO idempotency (
+                        idempotency_key, body_sha256, response_json, signature_version
+                    ) VALUES (?, ?, ?, ?)
+                    """,
+                    (key, digest, payload, signature_version),
                 )
                 conn.execute(
                     """
@@ -457,6 +468,14 @@ class StateDB:
             """,
             (key, handoff_id, body, state, now if forwarding else None),
         )
+
+    def _add_signature_version_column(self, conn: sqlite3.Connection) -> None:
+        """Add the nullable acceptance column once. Existing rows stay NULL."""
+        names = {
+            str(row[1]) for row in conn.execute("PRAGMA table_info(idempotency)").fetchall()
+        }
+        if "signature_version" not in names:
+            conn.execute("ALTER TABLE idempotency ADD COLUMN signature_version INTEGER")
 
     def _restrict(self, path: str) -> None:
         for candidate in (path, path + "-wal", path + "-shm"):
