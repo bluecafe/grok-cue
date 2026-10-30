@@ -41,6 +41,8 @@ def parse_retry_after(value: str | None) -> float | None:
 # Top-level keys sent to Grok. Nothing else from the Cue body is copied.
 FORWARD_FIELDS = (
     "handoff_id",
+    "attempt",
+    "report_seq",
     "repo",
     "github_ref",
     "status",
@@ -55,6 +57,8 @@ def handoff_payload(model: CueTaskRequest) -> dict[str, Any]:
     """JSON object whose keys are exactly FORWARD_FIELDS."""
     payload = {
         "handoff_id": str(model.handoff_id),
+        "attempt": model.attempt,
+        "report_seq": model.report_seq,
         "repo": model.repo,
         "github_ref": model.github_ref.model_dump(mode="json", exclude_none=True),
         "status": model.status,

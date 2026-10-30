@@ -2,7 +2,7 @@
 
 # grok-cue
 
-Current version: `0.0.5` ([VERSION](VERSION), [changelog](CHANGELOG.en.md))
+Current version: `0.1.0` ([VERSION](VERSION), [changelog](CHANGELOG.en.md))
 
 grok-cue is a small, signed "reception desk" between two AI assistant services:
 [Cue](https://cue.im/), the personal-agent app by Manus, and
@@ -22,13 +22,13 @@ Setup guides: [docs/SETUP.en.md](docs/SETUP.en.md) (for people) and [docs/AI_SET
 
 ## What works
 
-- `POST /v1/cue/tasks` accepts a handoff notice with a Bearer token **and** an HMAC-SHA256 signature over `{timestamp}.{raw_body}`, with a ±300 s clock window.
+- `POST /v1/cue/tasks` accepts a handoff notice with a Bearer token **and** an HMAC-SHA256 signature, with a ±300 s clock window. With no version header the signed input is `{timestamp}.{raw_body}` (v1). `X-Cue-Signature-Version: 2` signs `v2`, the method, the path, the timestamp, and the body, separated by newlines.
 - Each authenticated signature is single-use; replaying it returns `401`.
 - Primary and secondary tokens and HMAC keys for zero-downtime key rotation.
 - Idempotency by `idempotency_key`: same bytes return the original `202`, different bytes return `409`.
 - Strict body validation (64 KiB limit, `application/json`, `github_ref` shape, no `task_id` anywhere).
 - `reply_to` limited to an env-configured allowlist of single email addresses.
-- Optional forwarding of a fixed set of 8 fields (`handoff_id`, `repo`, `github_ref`, `status`, `summary`, `links`, `next_owner`, `idempotency_key`; [spec](docs/DESIGN.en.md#spec)) to `GROK_WEBHOOK_URL` in the background, with a 5 s timeout.
+- Optional forwarding of a fixed set of 10 fields (`handoff_id`, `attempt`, `report_seq`, `repo`, `github_ref`, `status`, `summary`, `links`, `next_owner`, `idempotency_key`; [spec](docs/DESIGN.en.md#spec)) to `GROK_WEBHOOK_URL` in the background, with a 5 s timeout.
 - Secrets (tokens, keys, signatures) and request bodies are kept out of logs.
 - `GET /healthz` for liveness.
 
@@ -117,7 +117,10 @@ Every `POST /v1/cue/tasks` needs all of:
 
 - `Authorization: Bearer <CUE_BRIDGE_TOKEN>`
 - `X-Cue-Timestamp`: Unix seconds, within ±300 s of server time
-- `X-Cue-Signature`: hex HMAC-SHA256 of `{timestamp}.{raw_body}` with `CUE_BRIDGE_HMAC_KEY`. Hex is case-insensitive; a `sha256=` prefix is rejected.
+- `X-Cue-Signature`: hex HMAC-SHA256. Hex is case-insensitive; a `sha256=` prefix is rejected.
+- No version header means v1. The input is `{timestamp}.{raw_body}`.
+- `X-Cue-Signature-Version: 2` means v2. The input is `v2`, METHOD, PATH, timestamp, and raw_body, joined by newlines. Example: METHOD `POST`, PATH `/v1/cue/tasks`.
+- Any other version value is `401`. v1 is not rejected yet.
 
 To retry, keep the exact body bytes and compute a new timestamp and signature.
 
@@ -126,7 +129,7 @@ To retry, keep the exact body bytes and compute a new timestamp and signature.
 # otherwise the fake handoff is really forwarded to Grok Bot.
 TOKEN='replace-with-bearer-token'; KEY='replace-with-hmac-key'
 TS="$(date +%s)"
-BODY='{"schema_version":"1","handoff_id":"00000000-0000-4000-8000-000000000000","repo":"owner/name","github_ref":{"repo":"owner/name","base_branch":"main","start_sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"idempotency_key":"example-key-1","title":"example","status":"completed","summary":"example summary","created_at":"2026-10-29T00:00:00Z","links":[],"next_owner":"example"}'
+BODY='{"schema_version":"1","handoff_id":"00000000-0000-4000-8000-000000000000","attempt":1,"report_seq":1,"repo":"owner/name","github_ref":{"repo":"owner/name","base_branch":"main","start_sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"idempotency_key":"example-key-1","title":"example","status":"completed","summary":"example summary","created_at":"2026-10-29T00:00:00Z","links":[],"next_owner":"example"}'
 SIG="$(printf '%s.%s' "$TS" "$BODY" | openssl dgst -sha256 -hmac "$KEY" -hex | awk '{print $NF}')"
 curl -sS -D - http://127.0.0.1:8160/v1/cue/tasks \
   -H "Authorization: Bearer $TOKEN" -H "X-Cue-Timestamp: $TS" -H "X-Cue-Signature: $SIG" \
@@ -138,7 +141,8 @@ Field reference: [docs/DESIGN.en.md](docs/DESIGN.en.md).
 ### Idempotency
 
 Same `idempotency_key` + same bytes → the original `202` with `forwarded: false`; no second notify or forward.
-Same key + different bytes (even reordered JSON keys) → `409`. Requests rejected for `reply_to` do not reserve the key.
+Same key + different bytes (even reordered JSON keys) → `409 idempotency_conflict`. Requests rejected for `reply_to` do not reserve the key.
+Same `(handoff_id, attempt, report_seq)` + different bytes → `409 sequence_conflict`. An older generation is stored only; the current generation and its forward are left unchanged.
 
 ### Responses
 
@@ -149,8 +153,9 @@ Same key + different bytes (even reordered JSON keys) → `409`. Requests reject
 | 400 | `invalid_request` + `fields` | Size (over 64 KiB is rejected before auth), content type, JSON, schema |
 | 400 | `task_id_not_allowed` | A `task_id` key anywhere in the body |
 | 400 | `reply_to_not_allowed` + `allowed` | `reply_to` not usable |
-| 401 | `unauthorized` | Token, signature, time window, or reused signature |
+| 401 | `unauthorized` | Token, signature, time window, reused signature, or unknown signature version |
 | 409 | `idempotency_conflict` | Same key, different body |
+| 409 | `sequence_conflict` | Same `(handoff_id, attempt, report_seq)`, different body |
 | 500 | `internal` | Unhandled error |
 
 `forwarded: true` means a forward was scheduled, not that Grok Bot received or acted on it.

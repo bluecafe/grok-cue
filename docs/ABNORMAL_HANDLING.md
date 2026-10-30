@@ -139,24 +139,23 @@ Cue 실행이 쓰는 GitHub App, 토큰, 또는 브라우저 세션이 그 순�
 - 재생 방지: 인증 통과 서명을 메모리에 600초 기억. **재시작하면 잊음**
 - 키: 기본·보조 토큰과 HMAC 키 각 1개(`settings.py`)
 - 테스트: `test_hmac_is_sha256_of_timestamp_dot_raw_body`, `test_timestamp_inside_window_is_accepted`, `test_timestamp_outside_window_is_unauthorized`, `test_same_signature_replay_is_unauthorized`, `test_secondary_hmac_key_is_accepted`, `test_bearer_and_hmac_are_both_required`, `test_filter_redacts_configured_secrets`, `test_request_logs_omit_secrets_and_summary`
-
-**현행 계약은 v1뿐입니다.**
+- 헤더 `X-Cue-Signature-Version`이 없으면 v1입니다. 값 `2`만 v2입니다. 그 밖의 값은 401입니다. v1은 아직 거절하지 않습니다. [구현] (0.1.0)
 
 ### 5.2 개선 제안 [제안·미구현, 일부 결정]
 | 항목 | 제안 | 상태 | 테스트(제안) |
 |---|---|---|---|
-| 메서드·경로 결합 | v2: `"v2\n"+METHOD+"\n"+PATH+"\n"+ts+"\n"+raw_body`, 헤더 `X-Cue-Signature-Version: 2`. **0.1.0에 순번 필드와 함께**, v1/v2 동시 수용 전환(5.3) | [결정, 2026-10-30] 미구현. Cue 지원은 미검증 전제 | `test_v2_signature_binds_method_and_path` |
+| 메서드·경로 결합 | v2: `"v2\n"+METHOD+"\n"+PATH+"\n"+ts+"\n"+raw_body`, 헤더 `X-Cue-Signature-Version: 2`. **0.1.0에 순번 필드와 함께**, v1/v2 동시 수용 전환(5.3) | [구현] (0.1.0). Cue 지원은 미검증 전제. v1은 아직 받음 | `test_v2_signature_binds_method_and_path`, `test_v1_v2_overlap_window`, `test_unknown_signature_version_401` |
 | 재생 기록 영속화 | SQLite `replay(sig_sha256 PK, ts)`, 접수 행과 같은 트랜잭션, 재시작 후에도 유지, DB 오류면 503(fail closed). 아웃박스 도입 시 같은 DB | 구현(0.0.3, P2) | `test_replay_rejected_after_restart`, `test_replay_store_unavailable_fails_closed` |
 | 키 교체 시점 | 보조에 새 키 → Cue 전환 확인 → 기본 교체 → 보조 비움. **90일마다, 유출 의심 시 즉시**. 값은 서버 환경 파일(권한 600)에만 | 슬롯은 현행, 주기는 [결정, 2026-10-30], 절차는 미구현 | `test_removed_key_is_rejected`, `test_log_shows_key_slot_not_key` |
 | 로그 금지 확장 | 인증 실패 사유만 기록, 비밀·서명·summary 없음 | 제안 | `test_auth_reason_log_has_no_secret` |
 
-### 5.3 v1과 호환되지 않는 변경의 전환 절차 [제안·미구현]
-v2 같은 비호환 변경은 아래 절차를 거치기 전에는 현행 계약으로 쓰지 않습니다.
-1. MINOR + **BREAKING** 버전 PR(12.1). v2는 0.1.0 [결정]
-2. 수용 기간: 헤더 없음 = v1, `X-Cue-Signature-Version: 2` = v2. 둘 다 받음
-3. Cue 전환을 사용자(owner)가 확인
-4. v1 거절은 별도 PR, 다시 BREAKING 표기
-- 테스트(제안): `test_v1_v2_overlap_window`, `test_unknown_signature_version_401`
+### 5.3 v1과 호환되지 않는 변경의 전환 절차 [구현(수용), v1 거절은 미구현]
+v2 같은 비호환 변경은 아래 절차를 거칩니다.
+1. MINOR + **BREAKING** 버전 PR(12.1). v2는 0.1.0 [구현]
+2. 수용 기간: 헤더 없음 = v1, `X-Cue-Signature-Version: 2` = v2. 둘 다 받음 [구현]
+3. Cue 전환을 사용자(owner)가 확인 [미구현]
+4. v1 거절은 별도 PR, 다시 BREAKING 표기 [미구현]
+- 테스트: `test_v1_v2_overlap_window`, `test_unknown_signature_version_401` [구현]
 
 ## 6. 접수·전달 의미와 아웃박스 [구현]
 
@@ -187,6 +186,7 @@ v2 같은 비호환 변경은 아래 절차를 거치기 전에는 현행 계약
 | 같은 키·같은 바디, `dead` | `202` 최초 바디 + `forwarded:false` + `forward_state:"dead"` | 없음. 수동 재전달 도구(8.3)로만 |
 | 같은 키·같은 바디, `disabled` | `202` 최초 바디 + `forwarded:false` + `forward_state:"disabled"` | 없음 |
 | 같은 키·**다른 바디**(키 순서만 달라도) | `409 idempotency_conflict` | 원래 접수 유지 [현행 구현] `test_same_key_different_body_conflicts_and_keeps_original` |
+| 같은 `(handoff_id, attempt, report_seq)`·다른 바디 | `409 sequence_conflict` | 원래 접수 유지 [구현] (0.1.0) `test_sequence_conflict_409` |
 | 같은 서명 재사용 | `401` | 저장 없음 [현행 구현] |
 | 저장소 오류 | `503 storage_unavailable` | 저장 없음 |
 
@@ -360,15 +360,16 @@ stateDiagram-v2
 
 ## 10. 순서 판단: `attempt`·`report_seq`
 
-### 10.1 결정: **0.1.0에 도입(BREAKING), 현행 계약(0.0.x)에는 없음** [결정, 2026-10-30, 미구현]
-- 현행 전달 필드는 8개뿐입니다 [현행 구현] (`forward.py: FORWARD_FIELDS`, `test_forward_payload_is_the_handoff_whitelist`). 요청 모델은 모르는 키를 400으로 거절합니다(`test_unknown_top_level_field_is_400`). 즉 지금 Cue가 `attempt`를 보내면 **거절됩니다**.
-- **0.1.0**(MINOR + **BREAKING**, HMAC v2와 함께)에 추가합니다 [결정, 미구현]. 그 전까지는 10.2(N1~N5) 규칙으로 `needs_human`에 멈춥니다:
+### 10.1 결정: **0.1.0에 도입(BREAKING)** [구현] (0.1.0)
+- 전달 필드는 10개입니다 [구현] (`forward.py: FORWARD_FIELDS`, `test_forward_payload_is_the_handoff_whitelist`). `attempt`와 `report_seq`는 필수입니다. 없거나 JSON 정수 1 이상이 아니면 `400`입니다. 모르는 키는 400입니다(`test_unknown_top_level_field_is_400`).
+- 규칙은 다음과 같습니다 [구현]:
   - `attempt`: 필수, 정수 ≥1. 같은 handoff_id 안의 재실행(T13/T16)마다 +1. `failed` 뒤 재지시(T18)는 새 handoff_id이므로 1부터. 한 attempt = 한 "세대"
   - `report_seq`: 필수, 정수 ≥1. 같은 attempt 안에서 보고마다 +1, attempt가 바뀌면 1부터
-  - 순서 = `(attempt, report_seq)` 사전순. 이전 세대 보고는 기록만 하고 상태를 바꾸지 않음
+  - 순서 = `(attempt, report_seq)` 사전순. 이전 세대 보고는 기록만 하고 상태를 바꾸지 않으며 전달하지 않음
   - 같은 `(handoff_id, attempt, report_seq)`에 다른 바디 → `409 sequence_conflict`
+- 0.0.x에서 필드가 없던 동안의 `needs_human` 규칙(10.2)은 아직 [제안·미구현]입니다.
 
-예시 [제안·미구현, 현행 코드는 400]
+예시 [구현]
 ```json
 {"handoff_id":"0f6c2d1e-0000-4000-8000-000000000001","attempt":2,"report_seq":1,"status":"in_progress","idempotency_key":"cue-0f6c2d1e-a2-r1"}
 ```
@@ -378,6 +379,8 @@ stateDiagram-v2
 (다른 필수 필드는 생략. 키 문자열은 순서 판단에 쓰지 않습니다.)
 
 ### 10.2 필드가 없는 동안(0.1.0 전)의 판정 규칙 [제안·미구현]
+
+0.1.0부터 `attempt`와 `report_seq`는 필수입니다. 아래 `needs_human` 처리는 상태 계약(P6)과 함께 아직 구현하지 않습니다.
 `created_at`이나 키 문자열로 순서를 추정하지 않습니다 [결정]. 아래 중 하나면 `needs_human`(T15)입니다. terminal 상태에서는 상태를 바꾸지 않고 9.5대로 처리합니다.
 | 기준 | 테스트(제안) |
 |---|---|
@@ -412,7 +415,7 @@ stateDiagram-v2
 | A17 | `needs_input` 보고 | 그대로 전달 | T03, 질문 전달 | T09 |
 | A18 | `in_progress` 보고 | 그대로 전달 | T02, T1 연장 | — |
 | A19 | 새 상태값(`partial` 등) | 400 | 추가하지 않음 | — |
-| A20 | 순서 뒤바뀜 | 키가 다르면 전부 전달 | 10.2 | 애매하면 `needs_human` |
+| A20 | 순서 뒤바뀜 | 이전 `(attempt, report_seq)`는 기록만 하고 전달하지 않음. 같은 순번·다른 바디는 `409 sequence_conflict` [구현] (0.1.0) | 10.2 | 애매하면 `needs_human` |
 | A21 | `created_at` 오차 | 시간대 유무만 | 순서에 쓰지 않음 | — |
 | A22 | 키 교체 | 보조 슬롯 | 5.2 절차 | S3 |
 | A23 | 처리 안 된 예외 | 500 | 커밋 전이면 저장 없음, 뒤면 6.3 재생 | S3 |
@@ -481,17 +484,17 @@ stateDiagram-v2
 | P5 | 사용자(owner) 이메일 알림(8.1) | 가짜 수신처 dead 1건 → 알림 1건 |
 | P6 | 상태 계약(9절) | `test_transition_table_matches_doc`, `test_terminal_states_never_change`, `test_cancel_report_moves_to_cancelled`, 10.2 테스트들 |
 | P7 | (결정 후) handoff 등록, 404·409 | `test_unknown_handoff_404`, `test_handoff_mismatch_409` |
-| P8 | HMAC v2(메서드·경로) + 5.3 전환, 0.1.0 | `test_v2_signature_binds_method_and_path`, `test_v1_v2_overlap_window` |
+| P8 | HMAC v2(메서드·경로) + 5.3 수용 [구현] (0.1.0). v1은 아직 받음 | `test_v2_signature_binds_method_and_path`, `test_v1_v2_overlap_window`, `test_unknown_signature_version_401` |
 | P9 | T1·T2 감시(둘 다 24시간) | 가짜 시계 → `stale`/`expired` |
 | P10 | (결정 후) completed 검증(4.2) | 정상 / 링크 404 / SHA 없음 |
 | P11 | (결정 후) 취소 | `test_cancel_idempotent`, `test_result_after_cancel_recorded` |
 | P12 | 민감정보 검사, 422 거부 | 가짜 패턴 → 422, 로그 원문 없음 |
-| P13 | `attempt`/`report_seq`(10.1), 0.1.0 | `test_spec.py`·`test_forward_fields` 갱신, `test_sequence_conflict_409` |
+| P13 | `attempt`/`report_seq`(10.1) [구현] (0.1.0) | `test_spec.py`·`test_forward_fields` 갱신, `test_sequence_conflict_409`, `test_older_generation_is_recorded_without_changing_state` |
 
 P3은 응답 의미를 바꾸므로(첫 202가 `forwarded:false`) Grok·Cue 공지가 함께 필요합니다.
 
 ### 12.1 버전 관리
-- 루트 `VERSION`은 **0.0.3**입니다. `CHANGELOG.md`와 `CHANGELOG.en.md`가 있습니다. 이 파일들은 PR #2에서 추가되었습니다. `0.0.1`은 main `2483c3b`의 기능과 문서입니다. 앱은 버전 파일을 읽지 않습니다.
+- 루트 `VERSION`은 **0.1.0**입니다. `CHANGELOG.md`와 `CHANGELOG.en.md`가 있습니다. 이 파일들은 PR #2에서 추가되었습니다. `0.0.1`은 main `2483c3b`의 기능과 문서입니다. 앱은 이 파일을 FastAPI `version` 필드에만 읽습니다.
 - 1.0 전: 문서·버그 = PATCH, 기능 = MINOR, 호환 깨짐(서명·필드) = MINOR + **BREAKING**
 - 버전은 머지되는 PR 안에서 올림. 태그는 사용자(owner) 승인 후에만
 - 목표: P0는 0.0.1 안에 포함(버전 올림 없음), P1 = 0.0.2. **0.1.0 = P13 순번 필드 + P8 HMAC v2 (BREAKING)** [결정]. 0.1.0 전의 비호환 없는 단계는 0.0.x PATCH로 올리고, 0.1.0은 P8과 P13 전용, P3 = 0.0.x PATCH(응답 의미 변경 공지)
@@ -510,8 +513,8 @@ P3은 응답 의미를 바꾸므로(첫 202가 `forwarded:false`) Grok·Cue 공�
 
 ### 13.1a 확정(사용자(owner), 2026-10-30 17:31–17:34 KST) [결정, 모두 미구현]
 1. 최종 전달 실패 알림 = 사용자(owner) 이메일(8.1). 주소는 문서에 쓰지 않음. 메일 실패 시 journal·`outbox_status.py`
-2. `attempt`/`report_seq`는 0.1.0에 도입(BREAKING). 그 전에는 N1~N5(10.2)
-3. HMAC v2는 메서드·경로 포함, 0.1.0에 순번 필드와 함께, v1/v2 동시 수용 전환(5.3)
+2. `attempt`/`report_seq`는 0.1.0에 도입(BREAKING) [구현] (0.1.0). 0.0.x의 N1~N5(10.2)는 아직 미구현
+3. HMAC v2는 메서드·경로 포함, 0.1.0에 순번 필드와 함께, v1/v2 동시 수용 [구현] (0.1.0). v1 거절은 별도 PR
 4. 키 교체 90일마다, 유출 의심 시 즉시(5.2)
 5. 재시도 첫 시도 포함 7회·총 60분(7.1). Cue 무응답 시간 초과 T1 = 24시간
 6. 늦은 결과·중복 완료·취소 뒤 결과는 표시를 붙여 Grok에 전달, 상태는 유지(9.5)

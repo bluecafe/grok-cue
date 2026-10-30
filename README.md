@@ -2,7 +2,7 @@
 
 # grok-cue
 
-현재 버전: `0.0.5` ([VERSION](VERSION), [변경 기록](CHANGELOG.md))
+현재 버전: `0.1.0` ([VERSION](VERSION), [변경 기록](CHANGELOG.md))
 
 grok-cue는 두 AI 비서 서비스 사이에 놓이는 작은 "접수 창구" 서버입니다. 하나는 Manus가 만든 개인용 에이전트 앱 [Cue](https://cue.im/)이고, 다른 하나는 클라우드 컴퓨터에서 일하는 xAI의 에이전트 [Grok Bot](https://docs.x.ai/grok-bot/overview)입니다.
 두 비서는 끝낸 일을 서로에게 직접 넘겨줄 방법이 없습니다. grok-cue는 Cue 쪽이 서명해서 보낸 "작업 완료" 알림을 HTTP로 받고, 설정해 두었다면 Grok Bot 웹훅으로 접수한 내용을 JSON으로 넘깁니다.
@@ -18,13 +18,13 @@ grok-cue는 두 AI 비서 서비스 사이에 놓이는 작은 "접수 창구" �
 
 ## 되는 것
 
-- `POST /v1/cue/tasks`로 작업 인계 알림을 받습니다. Bearer 토큰과 HMAC-SHA256 서명이 **둘 다** 맞아야 하고, 서명 대상은 `{timestamp}.{raw_body}`, 허용 시각 차이는 ±300초입니다.
+- `POST /v1/cue/tasks`로 작업 인계 알림을 받습니다. Bearer 토큰과 HMAC-SHA256 서명이 **둘 다** 맞아야 하고, 허용 시각 차이는 ±300초입니다. 버전 헤더가 없으면 서명 대상은 `{timestamp}.{raw_body}`(v1)입니다. `X-Cue-Signature-Version: 2`이면 `v2`, 메서드, 경로, 시각, 본문을 줄바꿈으로 잇습니다.
 - 인증에 성공한 서명은 한 번만 쓸 수 있습니다. 같은 서명을 다시 보내면 `401`입니다.
 - 키를 바꾸는 동안 서비스를 멈추지 않도록 기본 토큰·키와 보조 토큰·키를 함께 받습니다.
 - `idempotency_key`로 중복을 막습니다. 같은 바이트면 처음의 `202`를 그대로 돌려주고, 다른 바이트면 `409`입니다.
 - 본문을 엄격하게 검사합니다(64 KiB 제한, `application/json`, `github_ref` 형식, 어디에도 `task_id` 금지).
 - `reply_to`는 환경 변수로 정한 메일 주소 허용 목록 안에서만 받습니다.
-- 선택적으로, 정해진 8개 필드(`handoff_id`, `repo`, `github_ref`, `status`, `summary`, `links`, `next_owner`, `idempotency_key`)([스펙](docs/DESIGN.md#스펙))만 `GROK_WEBHOOK_URL`로 백그라운드 전달합니다. 제한 시간은 5초입니다.
+- 선택적으로, 정해진 10개 필드(`handoff_id`, `attempt`, `report_seq`, `repo`, `github_ref`, `status`, `summary`, `links`, `next_owner`, `idempotency_key`)([스펙](docs/DESIGN.md#스펙))만 `GROK_WEBHOOK_URL`로 백그라운드 전달합니다. 제한 시간은 5초입니다.
 - 토큰, 키, 서명 같은 비밀과 요청 본문은 로그에 남기지 않습니다.
 - `GET /healthz`로 서버가 켜져 있는지 확인할 수 있습니다.
 
@@ -111,7 +111,10 @@ Cue가 Bearer와 HMAC 서명 헤더를 붙인 POST를 직접 보낼 수 있는�
 
 - `Authorization: Bearer <CUE_BRIDGE_TOKEN>`
 - `X-Cue-Timestamp`: Unix 초. 서버 시각과 ±300초 이내
-- `X-Cue-Signature`: `CUE_BRIDGE_HMAC_KEY`로 `{timestamp}.{raw_body}`를 계산한 HMAC-SHA256 hex. hex 대소문자는 구분하지 않고, `sha256=` 접두사는 거절됩니다.
+- `X-Cue-Signature`: HMAC-SHA256 hex. hex 대소문자는 구분하지 않고, `sha256=` 접두사는 거절됩니다.
+- 버전 헤더가 없으면 v1입니다. 입력은 `{timestamp}.{raw_body}`입니다.
+- `X-Cue-Signature-Version: 2`이면 v2입니다. 입력은 `v2`, METHOD, PATH, timestamp, raw_body를 줄바꿈으로 이은 값입니다. 예: METHOD `POST`, PATH `/v1/cue/tasks`.
+- 그 밖의 버전 값은 `401`입니다. v1은 아직 거절하지 않습니다.
 
 다시 보낼 때는 본문 바이트를 그대로 두고 시각과 서명만 새로 계산합니다.
 
@@ -120,7 +123,7 @@ Cue가 Bearer와 HMAC 서명 헤더를 붙인 POST를 직접 보낼 수 있는�
 # 전달이 켜져 있으면 이 가짜 작업이 Grok Bot에 실제로 전달됩니다.
 TOKEN='replace-with-bearer-token'; KEY='replace-with-hmac-key'
 TS="$(date +%s)"
-BODY='{"schema_version":"1","handoff_id":"00000000-0000-4000-8000-000000000000","repo":"owner/name","github_ref":{"repo":"owner/name","base_branch":"main","start_sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"idempotency_key":"example-key-1","title":"example","status":"completed","summary":"example summary","created_at":"2026-10-29T00:00:00Z","links":[],"next_owner":"example"}'
+BODY='{"schema_version":"1","handoff_id":"00000000-0000-4000-8000-000000000000","attempt":1,"report_seq":1,"repo":"owner/name","github_ref":{"repo":"owner/name","base_branch":"main","start_sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"idempotency_key":"example-key-1","title":"example","status":"completed","summary":"example summary","created_at":"2026-10-29T00:00:00Z","links":[],"next_owner":"example"}'
 SIG="$(printf '%s.%s' "$TS" "$BODY" | openssl dgst -sha256 -hmac "$KEY" -hex | awk '{print $NF}')"
 curl -sS -D - http://127.0.0.1:8160/v1/cue/tasks \
   -H "Authorization: Bearer $TOKEN" -H "X-Cue-Timestamp: $TS" -H "X-Cue-Signature: $SIG" \
@@ -132,7 +135,8 @@ curl -sS -D - http://127.0.0.1:8160/v1/cue/tasks \
 ### 멱등(중복 방지)
 
 같은 `idempotency_key`와 같은 바이트 → 처음의 `202`를 `forwarded: false`로 다시 돌려줍니다. 알림과 전달은 다시 하지 않습니다.
-같은 키와 다른 바이트(JSON 키 순서만 바뀐 경우 포함) → `409`. `reply_to` 때문에 거절된 요청은 키를 차지하지 않습니다.
+같은 키와 다른 바이트(JSON 키 순서만 바뀐 경우 포함) → `409 idempotency_conflict`. `reply_to` 때문에 거절된 요청은 키를 차지하지 않습니다.
+같은 `(handoff_id, attempt, report_seq)`와 다른 바이트 → `409 sequence_conflict`. 이전 세대는 저장만 하고 현재 세대와 전달은 바꾸지 않습니다.
 
 ### 응답
 
@@ -143,8 +147,9 @@ curl -sS -D - http://127.0.0.1:8160/v1/cue/tasks \
 | 400 | `invalid_request` + `fields` | 크기(64 KiB 초과는 인증보다 먼저 거절), Content-Type, JSON, 스키마 |
 | 400 | `task_id_not_allowed` | 본문 어딘가에 `task_id` 키가 있음 |
 | 400 | `reply_to_not_allowed` + `allowed` | `reply_to`를 쓸 수 없음 |
-| 401 | `unauthorized` | 토큰, 서명, 시각 범위, 서명 재사용 |
+| 401 | `unauthorized` | 토큰, 서명, 시각 범위, 서명 재사용, 알 수 없는 서명 버전 |
 | 409 | `idempotency_conflict` | 같은 키, 다른 본문 |
+| 409 | `sequence_conflict` | 같은 `(handoff_id, attempt, report_seq)`, 다른 본문 |
 | 500 | `internal` | 처리하지 못한 오류 |
 
 `forwarded: true`는 전달을 예약했다는 뜻이지, Grok Bot이 받았거나 처리했다는 뜻이 아닙니다.

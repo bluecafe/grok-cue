@@ -184,12 +184,16 @@ def test_forward_payload_is_the_handoff_whitelist() -> None:
             summary="short result",
             links=["https://github.com/example/repo/pull/4"],
             requested_by="example-requester",
+            attempt=2,
+            report_seq=3,
         )
     )
     assert response.status_code == 202
     sent = json.loads(capture.requests[0].content)
     assert tuple(sent) == FORWARD_FIELDS
     assert sent["handoff_id"] == HANDOFF_ID
+    assert sent["attempt"] == 2
+    assert sent["report_seq"] == 3
     assert sent["repo"] == REPO
     assert sent["status"] == "completed"
     assert sent["summary"] == "short result"
@@ -204,7 +208,7 @@ def test_forward_payload_is_the_handoff_whitelist() -> None:
 def test_forward_fields_are_accepted_fields() -> None:
     from app.models import CueTaskRequest
 
-    assert len(FORWARD_FIELDS) == 8
+    assert len(FORWARD_FIELDS) == 10
     assert set(FORWARD_FIELDS) <= set(CueTaskRequest.model_fields)
 
 

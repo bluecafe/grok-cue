@@ -9,17 +9,17 @@
 이 문서가 요청 필드의 유일한 스펙입니다. 코드(`app/models.py`)는 이 스펙과 정확히 같아야 하며, `tests/test_spec.py`가 이 절의 목록과 모델 필드를 비교합니다.
 
 1. **본문 크기 제한:** 65536바이트(64 KiB). 인증보다 먼저 검사합니다. `Content-Length`가 이보다 크거나 숫자가 아니면 바로 거절하고, 길이가 없는 chunked 본문도 이 크기를 넘는 순간 읽기를 멈춥니다. 응답은 `400` `{"error":"invalid_request","fields":["body"]}`입니다. 이 값은 프로젝트에서 정한 것이며, 나중에 설정으로 바꿀 수 있게 할 수 있습니다.
-2. **받는 필드:** 아래 13개뿐입니다. 이 밖의 키는 `400 invalid_request`입니다.
-   - 요청 필드: `schema_version`, `handoff_id`, `repo`, `github_ref`, `idempotency_key`, `title`, `status`, `summary`, `created_at`, `links`, `next_owner`, `reply_to`, `requested_by`
+2. **받는 필드:** 아래 15개뿐입니다. 이 밖의 키는 `400 invalid_request`입니다.
+   - 요청 필드: `schema_version`, `handoff_id`, `attempt`, `report_seq`, `repo`, `github_ref`, `idempotency_key`, `title`, `status`, `summary`, `created_at`, `links`, `next_owner`, `reply_to`, `requested_by`
    - `github_ref` 필드: `repo`, `base_branch`, `start_sha`, `paths`, `issue_or_pr_url`, `issue_or_pr_number`
-3. **전달 규칙:** 접수된 13개 중 아래 8개만 이 순서로 Grok에 전달합니다. `schema_version`, `title`, `created_at`, `reply_to`, `requested_by`는 전달하지 않습니다. `github_ref`의 값이 없는 선택 항목은 빠집니다. `executed`, `forwarded`는 응답 전용이라 보내지 않습니다.
-   - 전달 필드: `handoff_id`, `repo`, `github_ref`, `status`, `summary`, `links`, `next_owner`, `idempotency_key`
+3. **전달 규칙:** 접수된 15개 중 아래 10개만 이 순서로 Grok에 전달합니다. `schema_version`, `title`, `created_at`, `reply_to`, `requested_by`는 전달하지 않습니다. `github_ref`의 값이 없는 선택 항목은 빠집니다. `executed`, `forwarded`는 응답 전용이라 보내지 않습니다.
+   - 전달 필드: `handoff_id`, `attempt`, `report_seq`, `repo`, `github_ref`, `status`, `summary`, `links`, `next_owner`, `idempotency_key`
 
 ## 서버가 하는 일
 
 서명이 맞는 JSON을 접수합니다. 접수 응답은 `202`이고 `status`는 `received`입니다. `executed`는 항상 `false`입니다. 이 응답은 실행, 머지, 배포, 결제 승인이 아닙니다.
 
-`GROK_WEBHOOK_URL`과 `GROK_WEBHOOK_KEY`가 둘 다 있으면, 접수 뒤 정해진 8개 필드만 Grok에 넘깁니다([스펙](#스펙) 3번). 메일은 보내지 않습니다. 제한 시간은 5초입니다. 전달이 실패해도 이미 돌려준 `202`는 바뀌지 않습니다.
+`GROK_WEBHOOK_URL`과 `GROK_WEBHOOK_KEY`가 둘 다 있으면, 접수 뒤 정해진 10개 필드만 Grok에 넘깁니다([스펙](#스펙) 3번). 메일은 보내지 않습니다. 제한 시간은 5초입니다. 전달이 실패해도 이미 돌려준 `202`는 바뀌지 않습니다. 이미 본 세대보다 이전 `(attempt, report_seq)`는 저장만 하고 넘기지 않습니다.
 
 `GROK_WEBHOOK_KEY_HEADER`가 없으면 `Authorization: Bearer <GROK_WEBHOOK_KEY>`를 보냅니다. 헤더 이름을 적으면 그 헤더의 값으로 키만 보냅니다.
 
@@ -80,6 +80,8 @@ Issue 본문에는 목표, 완료 조건, 실행할 테스트, `handoff_id`, `re
 | --- | --- | --- |
 | `schema_version` | 예 | 문자열 `"1"` |
 | `handoff_id` | 예 | 보낸 쪽이 만든 UUID. 응답에 같은 값을 돌려줍니다 |
+| `attempt` | 예 | JSON 정수 `1`–`9223372036854775807`. 같은 `handoff_id`의 재실행마다 증가합니다. 불리언·소수·문자열은 거절합니다 |
+| `report_seq` | 예 | JSON 정수 `1`–`9223372036854775807`. 같은 `attempt` 안에서 보고마다 증가하고, `attempt`가 바뀌면 1부터입니다 |
 | `repo` | 예 | `owner/name`. `github_ref.repo`와 같아야 합니다 |
 | `github_ref` | 예 | 위 객체 |
 | `idempotency_key` | 예 | 1–200자. 공백과 제어 문자가 없습니다. 본문 안에만 둡니다 |
@@ -111,3 +113,5 @@ Issue 본문에는 목표, 완료 조건, 실행할 테스트, `handoff_id`, `re
 ```
 
 같은 키와 같은 본문이면 `handoff_id`, `status`, `executed`는 첫 접수와 같고 `forwarded`는 `false`입니다. 로그에는 토큰, HMAC 키, Grok 키, 서명, 본문, 요약을 넣지 않습니다.
+
+순서는 `(attempt, report_seq)` 사전순입니다. 이미 저장한 세대보다 이전이면 그 보고는 저장만 하고, 현재 세대는 바꾸지 않으며 Grok으로 넘기지 않습니다. 같은 `(handoff_id, attempt, report_seq)`에 다른 본문 바이트면 `409` `{"error":"sequence_conflict"}`이고 처음 접수는 남습니다. 같은 `idempotency_key`에 다른 본문은 `409` `{"error":"idempotency_conflict"}`입니다.

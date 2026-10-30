@@ -123,6 +123,7 @@ def test_links_are_required_and_empty_list_is_allowed(harness: Harness) -> None:
         task_body(
             links=[f"https://github.com/{REPO}/pull/1"],
             idempotency_key="idem-one-link",
+            report_seq=2,
         ),
         timestamp=int(harness.now) + 2,
     )

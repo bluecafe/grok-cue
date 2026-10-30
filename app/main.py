@@ -21,6 +21,7 @@ from app.auth import (
     bearer_matches,
     parse_bearer,
     parse_unix_timestamp,
+    parse_signature_version,
     signature_matches,
 )
 from app.forward import GrokForwarder, handoff_payload
@@ -31,7 +32,7 @@ from app.persistence import ReplaySeen, StateDB, StorageUnavailable
 from app.redact import SecretRedactingFilter
 from app.reply_to import ReplyToNotAllowed, resolve_reply_to
 from app.settings import Settings
-from app.store import IdempotencyConflict, IdempotencyStore
+from app.store import IdempotencyConflict, IdempotencyStore, SequenceConflict
 
 logger = logging.getLogger("grok_cue")
 
@@ -220,13 +221,19 @@ def create_app(
         elif not bearer_matches(bearer, bridge.settings.bearer_tokens()):
             reasons.append("bearer_rejected")
         signature = (header_sig or "").strip()
-        if not signature:
+        sig_version = parse_signature_version(request.headers.get("x-cue-signature-version"))
+        if sig_version is None:
+            reasons.append("unknown_signature_version")
+        elif not signature:
             reasons.append("missing_signature")
         elif not signature_matches(
             header_sig,
             bridge.settings.hmac_keys(),
             timestamp,
             raw,
+            version=sig_version,
+            method=request.method,
+            path=request.url.path,
         ):
             reasons.append("signature_rejected")
         if reasons:
@@ -322,6 +329,8 @@ def create_app(
                     raw,
                     response_body,
                     handoff_id=str(model.handoff_id),
+                    attempt=model.attempt,
+                    report_seq=model.report_seq,
                     forward_payload=forward_payload,
                     forwarding=forward_payload is not None,
                 )
@@ -330,8 +339,11 @@ def create_app(
                     model.idempotency_key,
                     raw,
                     response_body,
+                    handoff_id=str(model.handoff_id),
+                    attempt=model.attempt,
+                    report_seq=model.report_seq,
                 )
-                if result.created:
+                if result.created and result.enqueue:
                     bridge.outbox.enqueue(
                         model.idempotency_key,
                         str(model.handoff_id),
@@ -347,6 +359,9 @@ def create_app(
         except IdempotencyConflict:
             logger.info("rejected error=idempotency_conflict")
             return json_error(409, "idempotency_conflict")
+        except SequenceConflict:
+            logger.info("rejected error=sequence_conflict")
+            return json_error(409, "sequence_conflict")
 
         if result.created:
             bridge.notifier.accepted(

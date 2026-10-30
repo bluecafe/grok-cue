@@ -18,6 +18,7 @@ _LINK = re.compile(r"https?://[^\s]+")
 
 WorkStatus = Literal["in_progress", "needs_input", "completed", "failed"]
 _MAX_ISSUE_NUMBER = 2_000_000_000
+_MAX_SEQUENCE = 2**63 - 1
 
 
 class GithubRef(BaseModel):
@@ -112,6 +113,8 @@ class CueTaskRequest(BaseModel):
 
     schema_version: Literal["1"]
     handoff_id: UUID
+    attempt: int
+    report_seq: int
     github_ref: GithubRef
     repo: str
     idempotency_key: str = Field(min_length=1, max_length=200)
@@ -123,6 +126,16 @@ class CueTaskRequest(BaseModel):
     next_owner: str = Field(min_length=1, max_length=200)
     reply_to: str | None = None
     requested_by: str | None = Field(default=None, max_length=200)
+
+    @field_validator("attempt", "report_seq", mode="before")
+    @classmethod
+    def sequence_number(cls, value: object, info: ValidationInfo) -> object:
+        name = info.field_name or "sequence"
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ValueError(name)
+        if value < 1 or value > _MAX_SEQUENCE:
+            raise ValueError(name)
+        return value
 
     @field_validator("repo")
     @classmethod

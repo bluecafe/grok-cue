@@ -141,7 +141,7 @@ After changing settings, reload with `sudo systemctl restart grok-cue.service`.
 
 Run a single process only. Do not pass `uvicorn --workers`, and do not run more than one service instance. The outbox worker is one task inside that process.
 
-With `ProtectSystem=strict`, the database directory is read-only unless a drop-in allows it. For the example path `/var/lib/grok-cue`, save this drop-in as `/etc/systemd/system/grok-cue.service.d/state-db.conf`. This block is a documentation example too.
+With `ProtectSystem=strict`, the database directory is read-only unless a drop-in allows it. For the example path `/var/lib/grok-cue`, save this drop-in as `/etc/systemd/system/grok-cue.service.d/state-db.conf`. This block is a documentation example too. If the unit is already `ProtectSystem=strict`, add only `ReadWritePaths`. The example below also sets `ProtectSystem=strict`, which turns that sandbox on when the base unit did not have it.
 
 ```ini
 [Service]
@@ -155,7 +155,7 @@ sudo chown bridge:bridge /var/lib/grok-cue
 sudo chmod 700 /var/lib/grok-cue
 ```
 
-An example `CUE_STATE_DB` value is `/var/lib/grok-cue/state.sqlite`. If that directory is not writable, the server returns `503 storage_unavailable`.
+An example `CUE_STATE_DB` value is `/var/lib/grok-cue/state.sqlite`. If that directory is not writable, `POST /v1/cue/tasks` returns `503 storage_unavailable`. `GET /healthz` still returns `ok`.
 
 ## 3. HTTPS reverse proxy
 
@@ -229,7 +229,7 @@ Headers:
 
 - `Authorization: Bearer <CUE_BRIDGE_TOKEN>`
 - `X-Cue-Timestamp`: current Unix seconds, within 300 s of server time
-- `X-Cue-Signature`: HMAC-SHA256 hex of `{timestamp}.{raw_body}` (case-insensitive). No `sha256=` prefix
+- `X-Cue-Signature`: HMAC-SHA256 hex (case-insensitive). No `sha256=` prefix. With no version header the input is `{timestamp}.{raw_body}` (v1). `X-Cue-Signature-Version: 2` joins `v2`, METHOD, PATH, timestamp, and the raw body with newlines. Any other version is `401`. v1 is still accepted
 - `Content-Type: application/json`
 
 There is exactly one dot between the timestamp string and the body bytes. Re-serializing the JSON changes the bytes and breaks the signature, so keep the original bytes.
@@ -269,7 +269,7 @@ For every request the sender must:
 
 1. Build the JSON body bytes once and keep them.
 2. Put the current Unix seconds in `X-Cue-Timestamp`.
-3. Put the HMAC-SHA256 hex of `{timestamp}.{body bytes}` in `X-Cue-Signature`.
+3. With no version header, put the HMAC-SHA256 hex of `{timestamp}.{body bytes}` in `X-Cue-Signature`. v2 sends `X-Cue-Signature-Version: 2` and signs `v2`, METHOD, PATH, timestamp, and the body bytes joined by newlines.
 4. POST with `Authorization` and `Content-Type: application/json`.
 
 [`scripts/check_bridge.py`](../scripts/check_bridge.py) is the **reference sender** that implements exactly these steps (section 6). The default is a dry run and sends nothing. A real send requires explicit `--send`. A test request can cause a real delivery to Grok Bot. The 2026-10-29 check is one request from the current Cue environment. Where Cue cannot send the request itself, send it the same way this script does.
@@ -280,9 +280,9 @@ When both `GROK_WEBHOOK_URL` and `GROK_WEBHOOK_KEY` are set, grok-cue POSTs JSON
 
 If `GROK_WEBHOOK_KEY_HEADER` is empty the header is `Authorization: Bearer <GROK_WEBHOOK_KEY>`; otherwise the bare key arrives in the named header, without a Bearer prefix.
 
-Only these 8 keys are sent ([DESIGN.en.md spec](DESIGN.en.md#spec)):
+Only these 10 keys are sent ([DESIGN.en.md spec](DESIGN.en.md#spec)):
 
-`handoff_id`, `repo`, `github_ref`, `status`, `summary`, `links`, `next_owner`, `idempotency_key`
+`handoff_id`, `attempt`, `report_seq`, `repo`, `github_ref`, `status`, `summary`, `links`, `next_owner`, `idempotency_key`
 
 `schema_version`, `title`, `created_at`, `reply_to`, `requested_by` are not included. This process never sends mail.
 
@@ -330,6 +330,7 @@ Use `--env PATH` if `.env` lives elsewhere. Resending the exact same timestamp a
 | `400` `invalid_request` | Body format; see `fields` | `Content-Type: application/json`, body ≤ 64 KiB, field names per [DESIGN.en.md](DESIGN.en.md) |
 | `400` `task_id_not_allowed` | A `task_id` key somewhere in the body | Remove it; use `handoff_id` only |
 | `409` `idempotency_conflict` | Different bytes with the same `idempotency_key` | Resend the original bytes. Reordered JSON keys count as a different body. The first acceptance stays |
+| `409` `sequence_conflict` | Different bytes for the same `(handoff_id, attempt, report_seq)` | Keep the first body for that generation. An older generation is stored and not forwarded |
 | `202` but `forwarded` is `false` | No forward was scheduled for this request | Both `GROK_WEBHOOK_URL` and `GROK_WEBHOOK_KEY` set? Replays are also `false` |
 | `202` but nothing at Grok Bot | Scheduled is not delivered; failures do not change Cue's `202` | URL is the routine's receiving address; key header name matches; 5 s timeout |
 | `dig` returns nothing | DNS does not point here yet | Check A/AAAA name and value; wait, then rerun `dig` and `nslookup` |

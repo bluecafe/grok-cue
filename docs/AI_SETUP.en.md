@@ -40,7 +40,7 @@ Grok Bot sends the task email. When `GROK_WEBHOOK_URL` and `GROK_WEBHOOK_KEY` ar
 - The routine's receiving address is `GROK_WEBHOOK_URL`.
 - If `GROK_WEBHOOK_KEY_HEADER` is empty, the header is `Authorization: Bearer <GROK_WEBHOOK_KEY>`.
 - If a header name is set, the bare key arrives in that header, without a Bearer prefix.
-- Received keys are only `handoff_id`, `repo`, `github_ref`, `status`, `summary`, `links`, `next_owner`, `idempotency_key`. Spec: [DESIGN.en.md](DESIGN.en.md#spec).
+- Received keys are only `handoff_id`, `attempt`, `report_seq`, `repo`, `github_ref`, `status`, `summary`, `links`, `next_owner`, `idempotency_key`. Spec: [DESIGN.en.md](DESIGN.en.md#spec).
 - `schema_version`, `title`, `created_at`, `reply_to`, `requested_by` are not sent.
 - Timeout is 5 s. If the background POST fails, or Grok does not return 2xx, the `202` already returned does not change.
 - Grok Bot does not send mail through this process, and grok-cue never sends mail.
@@ -65,7 +65,7 @@ Signing:
 
 - `Authorization: Bearer <CUE_BRIDGE_TOKEN>`
 - `X-Cue-Timestamp`: Unix seconds, within ±300 s of server time
-- `X-Cue-Signature`: HMAC-SHA256 hex (case-insensitive) of `{timestamp}.{raw_body}`. No `sha256=` prefix
+- `X-Cue-Signature`: HMAC-SHA256 hex (case-insensitive). With no version header the input is `{timestamp}.{raw_body}`. `X-Cue-Signature-Version: 2` joins `v2`, METHOD, PATH, timestamp, and raw_body with newlines. No `sha256=` prefix. Any other version is 401. v1 is still accepted
 - `Content-Type: application/json`
 - Key is `CUE_BRIDGE_HMAC_KEY`; during rotation the secondary is also accepted
 - Both Bearer and HMAC must match
@@ -94,7 +94,7 @@ The task email should contain:
 - `github_ref` `repo`, `base_branch`, `start_sha`
 - Optional: `paths`, `issue_or_pr_url`, `issue_or_pr_number`
 
-Required webhook JSON fields: `schema_version` `"1"`, `handoff_id`, `repo`, `github_ref`, `idempotency_key`, `title`, `status`, `summary`, `created_at`, `links`, `next_owner`. `reply_to` and `requested_by` are optional. `links` is `[]` if none. `status` is one of `in_progress`, `needs_input`, `completed`, `failed`. Never include `task_id`, `diff`, `patch`, `source`, full source, or secrets.
+Required webhook JSON fields: `schema_version` `"1"`, `handoff_id`, `attempt`, `report_seq`, `repo`, `github_ref`, `idempotency_key`, `title`, `status`, `summary`, `created_at`, `links`, `next_owner`. `attempt` and `report_seq` are JSON integers ≥ 1. `reply_to` and `requested_by` are optional. `links` is `[]` if none. `status` is one of `in_progress`, `needs_input`, `completed`, `failed`. Never include `task_id`, `diff`, `patch`, `source`, full source, or secrets.
 
 ## 2. Actions needing approval, and prohibitions
 
@@ -227,7 +227,7 @@ sudo systemctl status grok-cue.service
 
 Success: `systemctl is-active grok-cue.service` prints `active`.
 
-Run one process only. Do not add `uvicorn --workers`, and do not start a second service instance. With `ProtectSystem=strict`, the `ReadWritePaths=/var/lib/grok-cue` drop-in in [SETUP.en.md](SETUP.en.md) is required. If the database directory is not writable, the server returns `503 storage_unavailable`.
+Run one process only. Do not add `uvicorn --workers`, and do not start a second service instance. With `ProtectSystem=strict`, the `ReadWritePaths=/var/lib/grok-cue` drop-in in [SETUP.en.md](SETUP.en.md) is required. If the unit is already strict, add only `ReadWritePaths`. That example also sets `ProtectSystem=strict`, which turns the sandbox on when the base unit did not have it. If the database directory is not writable, `POST /v1/cue/tasks` returns `503 storage_unavailable`. `GET /healthz` stays `ok`.
 
 ### 3.5 HTTPS
 
@@ -274,6 +274,7 @@ Success criteria:
 | First signed POST | `202` | `status`=`received`, `executed`=`false` |
 | Same body, new timestamp and HMAC | `202` | Same `handoff_id`, `forwarded`=`false` |
 | Same `idempotency_key`, different body | `409` | `{"error":"idempotency_conflict"}` |
+| Same `(handoff_id, attempt, report_seq)`, different body | `409` | `{"error":"sequence_conflict"}` |
 
 The first `202` has `forwarded: true` only when both `GROK_WEBHOOK_URL` and `GROK_WEBHOOK_KEY` are set. With only one, `forwarded` is `false`. HTTP `202` means the bridge received and validated the request and recorded it in memory. It does not mean Grok received it, and it does not mean any task ran. `forwarded: true` only means Grok delivery was scheduled as an `add_task` background task. It is not confirmation of a Grok 2xx response, task completion, or success of the Grok Bot routine.
 
