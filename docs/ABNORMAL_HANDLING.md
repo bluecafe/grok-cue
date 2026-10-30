@@ -40,7 +40,7 @@
 ### 1.2 세 가지 신호를 구분합니다
 | 신호 | 뜻 | 근거 |
 |---|---|---|
-| `202` | **Bridge가 접수했다.** 현재는 메모리 저장뿐이라 재시작하면 잊음 | [현행 구현] `main.py: create_task`, `store.py: IdempotencyStore`("Restarting the process forgets prior acceptances") |
+| `202` | **Bridge가 접수했다.** `CUE_STATE_DB`가 있으면 SQLite에 남고, 비어 있으면 메모리뿐이라 재시작하면 잊음 | [구현] `main.py: create_task`, `app/persistence.py: StateDB`. 비어 있을 때는 `store.py: IdempotencyStore` |
 | `forwarded: true` | **Bridge의 전달 주장.** 현재는 "이 요청에서 전달을 예약했다"는 뜻. Grok 2xx 확인이 아님 | [현행 구현] `main.py`: `background_tasks.add_task(...)` 직후 `scheduled = True`, 응답 `forwarded = scheduled`. 실패는 `forward.py: GrokForwarder.send`가 로그만 남김 |
 | Grok 실제 수신 | Grok의 회신이나 사람의 별도 확인으로만 압니다 | 10-29 시험은 사용자(owner) 확인 |
 
@@ -146,7 +146,7 @@ Cue 실행이 쓰는 GitHub App, 토큰, 또는 브라우저 세션이 그 순�
 | 항목 | 제안 | 상태 | 테스트(제안) |
 |---|---|---|---|
 | 메서드·경로 결합 | v2: `"v2\n"+METHOD+"\n"+PATH+"\n"+ts+"\n"+raw_body`, 헤더 `X-Cue-Signature-Version: 2`. **0.1.0에 순번 필드와 함께**, v1/v2 동시 수용 전환(5.3) | [결정, 2026-10-30] 미구현. Cue 지원은 미검증 전제 | `test_v2_signature_binds_method_and_path` |
-| 재생 기록 영속화 | SQLite `replay(sig_sha256 PK, ts)`, 아웃박스와 **같은 DB**, 접수와 같은 트랜잭션, 재시작 후에도 유지, DB 오류면 503(fail closed) | [결정, 2026-10-30] 미구현 | `test_replay_rejected_after_restart`, `test_replay_store_unavailable_fails_closed` |
+| 재생 기록 영속화 | SQLite `replay(sig_sha256 PK, ts)`, 접수 행과 같은 트랜잭션, 재시작 후에도 유지, DB 오류면 503(fail closed). 아웃박스 도입 시 같은 DB | 구현(0.0.3, P2) | `test_replay_rejected_after_restart`, `test_replay_store_unavailable_fails_closed` |
 | 키 교체 시점 | 보조에 새 키 → Cue 전환 확인 → 기본 교체 → 보조 비움. **90일마다, 유출 의심 시 즉시**. 값은 서버 환경 파일(권한 600)에만 | 슬롯은 현행, 주기는 [결정, 2026-10-30], 절차는 미구현 | `test_removed_key_is_rejected`, `test_log_shows_key_slot_not_key` |
 | 로그 금지 확장 | 인증 실패 사유만 기록, 비밀·서명·summary 없음 | 제안 | `test_auth_reason_log_has_no_secret` |
 
@@ -161,7 +161,9 @@ v2 같은 비호환 변경은 아래 절차를 거치기 전에는 현행 계약
 ## 6. 접수·전달 의미와 아웃박스 [결정 + 제안·미구현]
 
 ### 6.1 정의
-- `202` = 접수 레코드와 아웃박스 행을 **한 트랜잭션**(SQLite)으로 커밋한 뒤에만 보냄. 저장 실패면 `503 storage_unavailable` [결정, 제안·미구현]
+- `202` = 접수 행과 replay 행을 한 트랜잭션으로 커밋한 뒤 202 [구현]. 저장 실패면 `503 storage_unavailable`
+- 아웃박스 행을 그 트랜잭션에 넣는 것은 P3 [제안·미구현]
+- `CUE_STATE_DB`가 비어 있으면 접수·replay 기록은 프로세스 메모리만 쓰고, 재시작하면 사라집니다.
 - `forwarded: true` = 그 아웃박스 행이 Grok 2xx를 받았을 때만 [결정, 제안·미구현]
 - 보장 범위: **최소 1회, 중복 가능**. Grok 수신 측의 영속 중복 제거(`idempotency_key`)가 검증되기 전에는 "중복 없는 1회 전달"을 약속하지 않습니다 [미검증 전제]
 
@@ -491,7 +493,7 @@ stateDiagram-v2
 P3은 응답 의미를 바꾸므로(첫 202가 `forwarded:false`) Grok·Cue 공지가 함께 필요합니다.
 
 ### 12.1 버전 관리
-- 루트 `VERSION`은 **0.0.1**이고, `CHANGELOG.md`와 `CHANGELOG.en.md`가 있습니다. 이 파일들은 PR #2에서 추가되었습니다. `0.0.1`은 main `2483c3b`의 기능과 문서입니다. 앱은 버전 파일을 읽지 않습니다. 이후 버전을 올리는 일은 [제안·미구현]입니다.
+- 루트 `VERSION`은 **0.0.3**입니다. `CHANGELOG.md`와 `CHANGELOG.en.md`가 있습니다. 이 파일들은 PR #2에서 추가되었습니다. `0.0.1`은 main `2483c3b`의 기능과 문서입니다. 앱은 버전 파일을 읽지 않습니다.
 - 1.0 전: 문서·버그 = PATCH, 기능 = MINOR, 호환 깨짐(서명·필드) = MINOR + **BREAKING**
 - 버전은 머지되는 PR 안에서 올림. 태그는 사용자(owner) 승인 후에만
 - 목표: P0는 0.0.1 안에 포함(버전 올림 없음), P1 = 0.0.2. **0.1.0 = P13 순번 필드 + P8 HMAC v2 (BREAKING)** [결정]. 0.1.0 전의 비호환 없는 단계는 0.0.x PATCH로 올리고, 0.1.0은 P8과 P13 전용, P3 = 0.0.x PATCH(응답 의미 변경 공지)
@@ -523,7 +525,7 @@ P3은 응답 의미를 바꾸므로(첫 202가 `forwarded:false`) Grok·Cue 공�
 추가 확정(사용자(owner), 2026-10-30 17:39–17:40 KST) [결정, 모두 미구현]
 11. T2(`needs_input` 응답 기한) = 24시간, 지나면 `expired`(T10)
 12. `redeliver.py`는 운영자(operator)가 운영. 기본 dry-run, 실제 전송은 매번 사용자(owner) 승인 후(8.3)
-13. 재생 기록은 SQLite(아웃박스와 같은 DB)에 영속 저장, 재시작 후에도 유지(5.2)
+13. 재생 기록은 SQLite에 영속 저장, 재시작 후에도 유지(5.2). 아웃박스 도입 시 같은 DB
 
 ### 13.2 남은 결정 (책임자별)
 **사용자(owner)**
