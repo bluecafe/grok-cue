@@ -119,7 +119,7 @@ Cue는 새 작업 메일을 받으면 ① 명세와 GitHub 참조를 확인하�
 | 항목 | 제안 | 상태 | 테스트(제안) |
 |---|---|---|---|
 | 메서드·경로 결합 | v2: `"v2\n"+METHOD+"\n"+PATH+"\n"+ts+"\n"+raw_body`, 헤더 `X-Cue-Signature-Version: 2`. **0.1.0에 순번 필드와 함께**, v1/v2 동시 수용 전환(5.3) | [결정, 2026-10-30] 미구현. Cue 지원은 미검증 전제 | `test_v2_signature_binds_method_and_path` |
-| 재생 기록 영속화 | SQLite `replay(sig_sha256 PK, ts)`, 접수와 같은 트랜잭션, DB 오류면 503(fail closed) | 결정 대기 | `test_replay_rejected_after_restart`, `test_replay_store_unavailable_fails_closed` |
+| 재생 기록 영속화 | SQLite `replay(sig_sha256 PK, ts)`, 아웃박스와 **같은 DB**, 접수와 같은 트랜잭션, 재시작 후에도 유지, DB 오류면 503(fail closed) | [결정, 2026-10-30] 미구현 | `test_replay_rejected_after_restart`, `test_replay_store_unavailable_fails_closed` |
 | 키 교체 시점 | 보조에 새 키 → Cue 전환 확인 → 기본 교체 → 보조 비움. **90일마다, 유출 의심 시 즉시**. 값은 OCI env 파일에만 | 슬롯은 현행, 주기는 [결정, 2026-10-30], 절차는 미구현 | `test_removed_key_is_rejected`, `test_log_shows_key_slot_not_key` |
 | 로그 금지 확장 | 인증 실패 사유만 기록, 비밀·서명·summary 없음 | 제안 | `test_auth_reason_log_has_no_secret` |
 
@@ -203,7 +203,7 @@ v2 같은 비호환 변경은 아래 절차를 거치기 전에는 현행 계약
 
 | 항목 | 내용 [제안·미구현] |
 |---|---|
-| 담당자 | 수신: 노른(사용자) [결정]. 복구 실행(`redeliver.py`) 담당: 결정 대기 |
+| 담당자 | 수신: 노른(사용자) [결정]. 복구 실행(`redeliver.py`): Nornen [결정], 실제 전송은 매번 노른(사용자) 승인 후 |
 | 발동 기준 | 행이 `dead`가 될 때 1회. 인증 실패 연속 5회 |
 | 알림 내용 | `handoff_id`, `repo`, `forward_state`, run·시도 수, 마지막 HTTP 코드나 오류 종류, 시각(KST) |
 | 넣지 않는 것 | 토큰, 키, 서명, `summary` 원문, 본문, 전체 소스, diff |
@@ -215,7 +215,7 @@ v2 같은 비호환 변경은 아래 절차를 거치기 전에는 현행 계약
 
 ### 8.3 수동 재전달 도구 [제안·미구현]
 - `scripts/redeliver.py --list`, `scripts/redeliver.py <idempotency_key>`
-- 기본 dry-run, `--send`일 때만 실제 전송. 한 번에 1건. 실제 Grok 전달 경고 출력
+- 운영: Nornen [결정, 2026-10-30]. 기본 dry-run, `--send`는 **매번 노른(사용자) 승인 후에만**. 한 번에 1건. 실제 Grok 전달 경고 출력
 - 7.2대로 새 run을 추가하고 이력은 보존
 
 ## 9. handoff 상태 계약 [제안·미구현]
@@ -250,7 +250,7 @@ v2 같은 비호환 변경은 아래 절차를 거치기 전에는 현행 계약
 | T07 | `stale` | 재요청 메일 발송 | `dispatched` |
 | T08 | `stale` | 재요청 뒤에도 T1 경과 | `needs_human` |
 | T09 | `needs_input` | 답변 메일(같은 handoff_id) | `dispatched` |
-| T10 | `needs_input` | T2 경과 | `expired` |
+| T10 | `needs_input` | T2(24시간 [결정]) 경과 | `expired` |
 | T11 | `verifying` | 확인 통과 | `completed` |
 | T12 | `verifying` | 확인 실패 | `verify_failed` |
 | T13 | `verify_failed` | 정정 요청 메일 | `dispatched` |
@@ -447,7 +447,7 @@ stateDiagram-v2
 | P6 | 상태 계약(9절) | `test_transition_table_matches_doc`, `test_terminal_states_never_change`, `test_cancel_report_moves_to_cancelled`, 10.2 테스트들 |
 | P7 | (결정 후) handoff 등록, 404·409 | `test_unknown_handoff_404`, `test_handoff_mismatch_409` |
 | P8 | HMAC v2(메서드·경로) + 5.3 전환, 0.1.0 | `test_v2_signature_binds_method_and_path`, `test_v1_v2_overlap_window` |
-| P9 | (결정 후) T1·T2 감시 | 가짜 시계 → `stale`/`expired` |
+| P9 | T1·T2 감시(둘 다 24시간) | 가짜 시계 → `stale`/`expired` |
 | P10 | (결정 후) completed 검증(4.2) | 정상 / 링크 404 / SHA 없음 |
 | P11 | (결정 후) 취소 | `test_cancel_idempotent`, `test_result_after_cancel_recorded` |
 | P12 | 민감정보 검사, 422 거부 | 가짜 패턴 → 422, 로그 원문 없음 |
@@ -485,11 +485,14 @@ P3은 응답 의미를 바꾸므로(첫 202가 `forwarded:false`) Grok·Cue 공�
 9. Cue GitHub 쓰기 = 브랜치·PR·Issue 댓글, 머지 금지
 10. 당분간 같은 계정 유지. 위험 남음. main 보호는 적용됨(2.1, 17:27 KST 확인)
 
+추가 확정(노른(사용자), 2026-10-30 17:39–17:40 KST) [결정, 모두 미구현]
+11. T2(`needs_input` 응답 기한) = 24시간, 지나면 `expired`(T10)
+12. `redeliver.py`는 Nornen이 운영. 기본 dry-run, 실제 전송은 매번 노른(사용자) 승인 후(8.3)
+13. 재생 기록은 SQLite(아웃박스와 같은 DB)에 영속 저장, 재시작 후에도 유지(5.2)
+
 ### 13.2 남은 결정 (책임자별)
 **노른(사용자)**
-1. T2 값(`needs_input` 응답 기한, 제안 72h)
-2. 복구 실행(`redeliver.py`) 담당 지정(8.1, Nornen 후보)
-2a. 재생 기록 SQLite 영속화(5.2) 채택 여부
+- 없음(현재 목록 기준)
 
 **Grok/PM**
 3. 4.2(b) 실제 존재·허용 확인을 누가 어떤 읽기 권한으로 할지 제안(Grok `gh` / Bridge 읽기 토큰 = 새 비밀값)
@@ -512,7 +515,7 @@ P3은 응답 의미를 바꾸므로(첫 202가 `forwarded:false`) Grok·Cue 공�
 16. 작업 브랜치 이름 규칙(예: `cue/{handoff_id}`) 수용 여부
 
 **Nornen**
-17. 운영 담당으로 `redeliver.py` 실행을 맡을지(노른(사용자) 지정 필요)
+17. `redeliver.py` 운영 수락 확인(노른(사용자) 지정됨, 13.1a-12)
 18. grok-cue 머지는 매번 노른(사용자) 승인 후 실행(자동 머지 대상 아님)
 
 ## 14. 미검증 전제 모음
