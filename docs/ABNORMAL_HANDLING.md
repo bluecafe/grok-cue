@@ -144,7 +144,7 @@ Cue 실행이 쓰는 GitHub App, 토큰, 또는 브라우저 세션이 그 순�
 ### 5.2 개선 제안 [일부 구현, 키 교체 절차는 미구현]
 | 항목 | 제안 | 상태 | 테스트(제안) |
 |---|---|---|---|
-| 메서드·경로 결합 | v2: `"v2\n"+METHOD+"\n"+PATH+"\n"+ts+"\n"+raw_body`, 헤더 `X-Cue-Signature-Version: 2`. 0.2.0부터 v2만 받음 | [구현] (0.2.0). Cue 실제 요청 검증은 [미확인] | `test_v2_signature_binds_method_and_path`, `test_v1_header_is_401`, `test_missing_signature_version_is_401`, `test_v2_header_is_202`, `test_unknown_signature_version_401` |
+| 메서드·경로 결합 | v2: `"v2\n"+METHOD+"\n"+PATH+"\n"+ts+"\n"+raw_body`, 헤더 `X-Cue-Signature-Version: 2`. 0.2.0부터 v2만 받음 | [구현] (0.2.0). Cue 실제 요청 검증은 [확인] / [confirmed]: 2026-10-30 22:40:43 KST, handoff `20e64635`, `idempotency_key` `cue-20e64635-a1-r1`, journal `signature_version=2`, DB `idempotency.signature_version=2`, outbox `delivered` `attempts=1`, Grok `200`. 운영자(operator)가 읽기 전용으로 확인했다. The operator role checked this read-only. | `test_v2_signature_binds_method_and_path`, `test_v1_header_is_401`, `test_missing_signature_version_is_401`, `test_v2_header_is_202`, `test_unknown_signature_version_401` |
 | 재생 기록 영속화 | SQLite `replay(sig_sha256 PK, ts)`, 접수 행과 같은 트랜잭션, 재시작 후에도 유지, DB 오류면 503(fail closed). 아웃박스 도입 시 같은 DB | 구현(0.0.3, P2) | `test_replay_rejected_after_restart`, `test_replay_store_unavailable_fails_closed` |
 | 키 교체 시점 | 보조에 새 키 → Cue 전환 확인 → 기본 교체 → 보조 비움. **90일마다, 유출 의심 시 즉시**. 값은 서버 환경 파일(권한 600)에만 | 슬롯은 현행, 주기는 [결정, 2026-10-30], 절차는 미구현 | `test_removed_key_is_rejected`, `test_log_shows_key_slot_not_key` |
 | 로그 금지 확장 | 인증 실패 사유만 기록, 비밀·서명·summary 없음 | [구현] (0.0.2) | `test_auth_reason_log_has_no_secret` |
@@ -153,7 +153,7 @@ Cue 실행이 쓰는 GitHub App, 토큰, 또는 브라우저 세션이 그 순�
 v2를 도입한 뒤의 전환은 아래와 같습니다.
 1. MINOR + **BREAKING** 버전 PR. v2 도입은 0.1.0, v1 거절은 0.2.0 [구현]
 2. 0.1.x 수용 기간에는 헤더 없음 = v1, `X-Cue-Signature-Version: 2` = v2를 함께 받았습니다. 그 기간은 0.2.0에서 끝났습니다
-3. Cue가 v2만 보내는지는 [미확인]
+3. Cue가 v2로 보낸 것은 [확인]이다. 근거는 2026-10-30 22:40:43 KST의 Cue 실제 요청이다. handoff `20e64635`, `idempotency_key` `cue-20e64635-a1-r1`. 저널은 `signature_version=2`이고 DB `idempotency.signature_version`은 `2`이다. 아웃박스는 `delivered`, `attempts=1`이며 Grok은 `200`을 반환했다. 운영자(operator)가 읽기 전용으로 확인했다. Cue sending v2 is [confirmed]. Evidence is the same real Cue request at 2026-10-30 22:40:43 KST, handoff `20e64635`, idempotency_key `cue-20e64635-a1-r1`. The journal recorded `signature_version=2`, and `idempotency.signature_version` is `2`. The outbox row is `delivered` with `attempts=1`, and Grok returned `200`. The operator role checked this read-only.
 4. v1 거절 [구현] (0.2.0): 헤더가 없거나 값이 `1`이면 `401` `{"error":"unauthorized"}`. 응답 본문에 서명이나 비밀을 넣지 않습니다
 - 테스트: `test_v1_header_is_401`, `test_missing_signature_version_is_401`, `test_v2_header_is_202`, `test_unknown_signature_version_401` [구현]
 
@@ -484,7 +484,7 @@ stateDiagram-v2
 | P5 | 사용자(owner) 이메일 알림(8.1) | 가짜 수신처 dead 1건 → 알림 1건 |
 | P6 | 상태 계약(9절) | `test_transition_table_matches_doc`, `test_terminal_states_never_change`, `test_cancel_report_moves_to_cancelled`, 10.2 테스트들 |
 | P7 | (결정 후) handoff 등록, 404·409 | `test_unknown_handoff_404`, `test_handoff_mismatch_409` |
-| P8 | HMAC v2(메서드·경로) [구현·배포] (0.1.0). v1 거절 [구현] (0.2.0, BREAKING). Cue 실제 요청 검증은 [미확인] | `test_v2_signature_binds_method_and_path`, `test_v1_header_is_401`, `test_missing_signature_version_is_401`, `test_v2_header_is_202`, `test_unknown_signature_version_401` |
+| P8 | HMAC v2(메서드·경로) [구현·배포] (0.1.0). v1 거절 [구현] (0.2.0, BREAKING). Cue 실제 요청 검증은 [확인] / [confirmed]: 2026-10-30 22:40:43 KST, handoff `20e64635`, `idempotency_key` `cue-20e64635-a1-r1`, `signature_version=2`, outbox `delivered` `attempts=1`, Grok `200`. 운영자(operator) 읽기 전용. The operator role checked this read-only. | `test_v2_signature_binds_method_and_path`, `test_v1_header_is_401`, `test_missing_signature_version_is_401`, `test_v2_header_is_202`, `test_unknown_signature_version_401` |
 | P9 | T1·T2 감시(둘 다 24시간) | 가짜 시계 → `stale`/`expired` |
 | P10 | (결정 후) completed 검증(4.2) | 정상 / 링크 404 / SHA 없음 |
 | P11 | (결정 후) 취소 | `test_cancel_idempotent`, `test_result_after_cancel_recorded` |

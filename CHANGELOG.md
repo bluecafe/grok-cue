@@ -47,6 +47,12 @@ MINOR + **BREAKING**. v1 HMAC을 거절합니다.
 - 검증을 통과해 접수되면 로그와 접수 행에는 `signature_version=2`만 남습니다.
 - 접수 행에 `signature_version` 열을 더하는 마이그레이션은 하나의 트랜잭션입니다. 실패하면 `503 storage_unavailable`입니다.
 
+### 배포와 보내는 쪽
+
+- 이 PR은 배포를 포함하지 않습니다. 배포는 노른(사용자)의 별도 승인이 필요합니다.
+- 보내는 쪽은 `X-Cue-Signature-Version: 2`를 붙이고, `v2`, METHOD, PATH, timestamp, raw_body를 줄바꿈으로 이은 값에 서명합니다. 예: METHOD `POST`, PATH `/v1/cue/tasks`, 호스트 `hook.example.com`. 헤더가 없거나 `1`인 v1 송신은 이제 `401`입니다.
+- 0.1.1 이전에 기록된 접수 행의 `signature_version`이 NULL인 것은 그때 그 열이 없었기 때문입니다. 서명이 실패했다는 뜻도, 버전이 1이라는 뜻도 아닙니다. 0.2.0 이후의 새 접수는 `2`만 저장합니다.
+
 ## 0.1.1 — 2026-10-30
 
 PATCH입니다. 서명 방식과 요청 필드는 바꾸지 않습니다.

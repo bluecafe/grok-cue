@@ -47,6 +47,12 @@ MINOR and **BREAKING**. HMAC v1 is rejected.
 - A verified acceptance logs and stores only `signature_version=2`.
 - Adding the `signature_version` column runs in one transaction. If that migration fails, the response is `503 storage_unavailable`.
 
+### Deployment and senders
+
+- This PR does not deploy. Deployment needs separate approval from 노른(사용자).
+- Senders must send `X-Cue-Signature-Version: 2` and sign `v2`, METHOD, PATH, timestamp, and raw_body joined by newlines. Example: METHOD `POST`, PATH `/v1/cue/tasks`, host `hook.example.com`. A v1 sender, with the header missing or set to `1`, now receives `401`.
+- `signature_version` NULL on a row recorded before 0.1.1 means the column did not exist yet. It does not mean the signature failed, and it does not mean version 1. Acceptances after 0.2.0 store only `2`.
+
 ## 0.1.1 — 2026-10-30
 
 PATCH. The signature and the request fields are unchanged.
