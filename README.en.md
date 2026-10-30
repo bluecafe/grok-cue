@@ -2,7 +2,7 @@
 
 # grok-cue
 
-Current version: `0.1.1` ([VERSION](VERSION), [changelog](CHANGELOG.en.md))
+Current version: `0.2.0` ([VERSION](VERSION), [changelog](CHANGELOG.en.md))
 
 grok-cue is a small, signed "reception desk" between two AI assistant services:
 [Cue](https://cue.im/), the personal-agent app by Manus, and
@@ -22,14 +22,14 @@ Setup guides: [docs/SETUP.en.md](docs/SETUP.en.md) (for people) and [docs/AI_SET
 
 ## What works
 
-- `POST /v1/cue/tasks` accepts a handoff notice with a Bearer token **and** an HMAC-SHA256 signature, with a ±300 s clock window. With no version header the signed input is `{timestamp}.{raw_body}` (v1). `X-Cue-Signature-Version: 2` signs `v2`, the method, the path, the timestamp, and the body, separated by newlines.
+- `POST /v1/cue/tasks` accepts a handoff notice with a Bearer token **and** an HMAC-SHA256 signature, with a ±300 s clock window. `X-Cue-Signature-Version: 2` is required. The signed input is `v2`, the method, the path, the timestamp, and the body, separated by newlines. A missing header or `1` returns `401`.
 - Each authenticated signature is single-use; replaying it returns `401`.
 - Primary and secondary tokens and HMAC keys for zero-downtime key rotation.
 - Idempotency by `idempotency_key`: same bytes return the original `202`, different bytes return `409`.
 - Strict body validation (64 KiB limit, `application/json`, `github_ref` shape, no `task_id` anywhere).
 - `reply_to` limited to an env-configured allowlist of single email addresses.
 - Optional forwarding of a fixed set of 10 fields (`handoff_id`, `attempt`, `report_seq`, `repo`, `github_ref`, `status`, `summary`, `links`, `next_owner`, `idempotency_key`; [spec](docs/DESIGN.en.md#spec)) to `GROK_WEBHOOK_URL`. Each attempt times out at 5 s. Retries are at most 7 attempts including the first, inside 60 minutes from the first attempt.
-- Secrets (tokens, keys, signatures) and request bodies are kept out of logs. A verified acceptance logs only `signature_version=1` or `2` and stores that integer on the acceptance row. The response body has no version.
+- Secrets (tokens, keys, signatures) and request bodies are kept out of logs. A verified acceptance logs and stores only `signature_version=2`. The response body has no version.
 - `GET /healthz` for liveness.
 
 When `CUE_STATE_DB` is set, acceptance, signature-replay, and outbox rows stay in that SQLite file. When it is empty, they stay in process memory and are lost on restart.
@@ -120,10 +120,9 @@ Every `POST /v1/cue/tasks` needs all of:
 - `Authorization: Bearer <CUE_BRIDGE_TOKEN>`
 - `X-Cue-Timestamp`: Unix seconds, within ±300 s of server time
 - `X-Cue-Signature`: hex HMAC-SHA256. Hex is case-insensitive; a `sha256=` prefix is rejected.
-- No version header means v1. The input is `{timestamp}.{raw_body}`.
-- `X-Cue-Signature-Version: 2` means v2. The input is `v2`, METHOD, PATH, timestamp, and raw_body, joined by newlines. Example: METHOD `POST`, PATH `/v1/cue/tasks`.
-- Any other version value is `401`. v1 is not rejected yet. Rejecting v1 is a proposal for a later version and is not implemented.
-- A verified acceptance logs and stores `signature_version` `1` or `2`. The signature string is not logged.
+- `X-Cue-Signature-Version: 2` is required. The input is `v2`, METHOD, PATH, timestamp, and raw_body, joined by newlines. Example: METHOD `POST`, PATH `/v1/cue/tasks`.
+- A missing header, `1`, or any other value is `401` `{"error":"unauthorized"}`. The response body contains no signature and no secret.
+- A verified acceptance logs and stores only `signature_version=2`. The signature string is not logged.
 
 To retry, keep the exact body bytes and compute a new timestamp and signature.
 
@@ -133,9 +132,10 @@ To retry, keep the exact body bytes and compute a new timestamp and signature.
 TOKEN='replace-with-bearer-token'; KEY='replace-with-hmac-key'
 TS="$(date +%s)"
 BODY='{"schema_version":"1","handoff_id":"00000000-0000-4000-8000-000000000000","attempt":1,"report_seq":1,"repo":"owner/name","github_ref":{"repo":"owner/name","base_branch":"main","start_sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"idempotency_key":"example-key-1","title":"example","status":"completed","summary":"example summary","created_at":"2026-10-29T00:00:00Z","links":[],"next_owner":"example"}'
-SIG="$(printf '%s.%s' "$TS" "$BODY" | openssl dgst -sha256 -hmac "$KEY" -hex | awk '{print $NF}')"
+SIG="$(printf 'v2\nPOST\n/v1/cue/tasks\n%s\n%s' "$TS" "$BODY" | openssl dgst -sha256 -hmac "$KEY" -hex | awk '{print $NF}')"
 curl -sS -D - http://127.0.0.1:8160/v1/cue/tasks \
   -H "Authorization: Bearer $TOKEN" -H "X-Cue-Timestamp: $TS" -H "X-Cue-Signature: $SIG" \
+  -H "X-Cue-Signature-Version: 2" \
   -H "Content-Type: application/json" --data-binary "$BODY"
 ```
 

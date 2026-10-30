@@ -12,6 +12,7 @@ def test_omitted_reply_to_uses_default(harness: Harness) -> None:
             response.json()["handoff_id"],
             "example/repo",
             "cue@example.com",
+            2,
         )
     ]
 

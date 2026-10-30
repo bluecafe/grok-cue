@@ -112,6 +112,6 @@ Issue 본문에는 목표, 완료 조건, 실행할 테스트, `handoff_id`, `re
 {"handoff_id":"<uuid>","status":"received","executed":false,"forwarded":false,"forward_state":"queued"}
 ```
 
-같은 키와 같은 본문이면 `handoff_id`, `status`, `executed`는 첫 접수와 같습니다. `forwarded`와 `forward_state`는 그때의 아웃박스 상태입니다. 로그에는 토큰, HMAC 키, Grok 키, 서명, 본문, 요약을 넣지 않습니다. 검증을 통과해 접수되면 `signature_version=1` 또는 `2`만 로그와 접수 행에 남습니다.
+같은 키와 같은 본문이면 `handoff_id`, `status`, `executed`는 첫 접수와 같습니다. `forwarded`와 `forward_state`는 그때의 아웃박스 상태입니다. 로그에는 토큰, HMAC 키, Grok 키, 서명, 본문, 요약을 넣지 않습니다. 검증을 통과해 접수되면 `signature_version=2`만 로그와 접수 행에 남습니다. `X-Cue-Signature-Version: 2`가 없으면 `401`입니다.
 
 순서는 `(attempt, report_seq)` 사전순입니다. 이미 저장한 세대보다 이전이면 그 보고는 저장만 하고, 현재 세대는 바꾸지 않으며 Grok으로 넘기지 않습니다. 같은 `(handoff_id, attempt, report_seq)`에 다른 본문 바이트면 `409` `{"error":"sequence_conflict"}`이고 처음 접수는 남습니다. 같은 `idempotency_key`에 다른 본문은 `409` `{"error":"idempotency_conflict"}`입니다.

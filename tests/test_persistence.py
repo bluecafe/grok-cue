@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from tests.conftest import build_harness
-from tests.support import HMAC_KEY, HANDOFF_ID, sign, task_body
+from tests.support import HMAC_KEY, HANDOFF_ID, sign_v2, task_body
 
 
 def _close(harness) -> None:
@@ -46,7 +46,7 @@ def test_replay_rejected_after_restart(tmp_path: Path) -> None:
     body = task_body(idempotency_key="idem-replay-restart")
     first_app = build_harness(state_db=str(database))
     timestamp = str(int(first_app.now))
-    signature = sign(HMAC_KEY, timestamp, body)
+    signature = sign_v2(HMAC_KEY, "POST", "/v1/cue/tasks", timestamp, body)
     first = first_app.post(body, timestamp=int(timestamp), signature=signature)
     assert first.status_code == 202
     _close(first_app)

@@ -2,7 +2,7 @@
 
 # grok-cue 비정상 상황 처리 분석·설계안 (v5, 검토 의견 8개 + 사용자(owner) 결정 10개 반영)
 
-- 대상: `bluecafe/grok-cue` main `3f75dd3` (0.1.1). 읽기 전용으로 `app/forward.py`, `app/main.py`, `app/auth.py`, `app/store.py`를 다시 읽어 확인했습니다.
+- 대상: VERSION `0.2.0`. 읽기 전용으로 `app/forward.py`, `app/main.py`, `app/auth.py`, `app/store.py`를 다시 읽어 확인했습니다.
 - 범위: 문서만. 코드·테스트·Bridge 수신기·메일 루틴·인프라·시크릿·배포는 건드리지 않습니다.
 - 표기 (모든 문장·행에 셋 중 하나):
   - **[현행 구현]** 코드에서 확인한 동작. 파일·함수를 함께 적음
@@ -92,11 +92,11 @@ Cue 실행이 쓰는 GitHub App, 토큰, 또는 브라우저 세션이 그 순�
 | S2 | Cue 확인·작업 | Bridge 밖 |
 | S3 | `POST https://hook.example.com/v1/cue/tasks` | `main.py: create_task` |
 | S3a | 인증 전 64 KiB 제한 | `MAX_BODY_BYTES`, `read_limited_body` |
-| S3b | 타임스탬프 ±300초 → Bearer + HMAC v1 또는 v2 | `auth.py` |
+| S3b | 타임스탬프 ±300초 → Bearer + HMAC v2. 헤더가 없거나 `1`이면 401 | `auth.py` |
 | S3c | 서명 재사용 거절(600초). `CUE_STATE_DB`가 있으면 SQLite, 비면 메모리 | `persistence.py`, `auth.py: ReplayCache` |
 | S3d | Content-Type, JSON, `task_id` 금지, reply_to, 15필드 스키마 | `main.py`, `models.py`, `reply_to.py` |
 | S3e | idempotency 판정(바디 SHA-256). DB가 있으면 SQLite, 비면 메모리 | `persistence.py`, `store.py` |
-| S4 | 첫 접수 로그. `signature_version=1` 또는 `2`만, 서명 값은 없음 | `notify.py: LogNotifier` |
+| S4 | 첫 접수 로그. `signature_version=2`만, 서명 값은 없음 | `notify.py: LogNotifier` |
 | S5 | 10필드 전달. 시도당 5초, 최대 7회·60분. 실패는 재시도 또는 `dead` | `forward.py: GrokForwarder.attempt`, `outbox.py` |
 | S6 | `202`에 `handoff_id`, `status: received`, `executed: false`, `forwarded`, `forward_state` | `main.py` |
 
@@ -131,32 +131,31 @@ Cue 실행이 쓰는 GitHub App, 토큰, 또는 브라우저 세션이 그 순�
 
 ## 5. 웹훅 보안
 
-### 5.1 현행 HMAC v1 [현행 구현]
-- `hex(HMAC-SHA256(key, timestamp + "." + raw_body))` (`auth.py: hmac_sha256_hex`)
+### 5.1 현행 HMAC v2 [구현] (0.2.0)
+- 입력은 `"v2\n"+METHOD+"\n"+PATH+"\n"+ts+"\n"+raw_body` (`auth.py: hmac_v2_hex`). 헤더는 `X-Cue-Signature-Version: 2`
 - `timestamp`: `X-Cue-Timestamp`, 공백 제거, 숫자 12자리 이하, `|now - ts| ≤ 300초`. 벗어나면 JSON 해석 전 401
 - 서명: `X-Cue-Signature`, 대소문자 무관, `sha256=` 접두어 불가. Bearer와 HMAC이 **둘 다** 맞아야 함
-- 메서드·경로는 서명에 **들어가지 않음**
+- v1 거절 [구현] (0.2.0): 헤더가 없거나 값이 `1`이거나 그 밖이면 `401` `{"error":"unauthorized"}`. 응답 본문에 서명이나 비밀을 넣지 않습니다. v2만 받습니다
 - 재생 방지: 인증 통과 서명을 600초 기억. `CUE_STATE_DB`가 있으면 SQLite라 재시작 후에도 남고, 비어 있으면 메모리뿐이라 재시작하면 잊음 [구현]
 - 키: 기본·보조 토큰과 HMAC 키 각 1개(`settings.py`)
-- 테스트: `test_hmac_is_sha256_of_timestamp_dot_raw_body`, `test_timestamp_inside_window_is_accepted`, `test_timestamp_outside_window_is_unauthorized`, `test_same_signature_replay_is_unauthorized`, `test_secondary_hmac_key_is_accepted`, `test_bearer_and_hmac_are_both_required`, `test_filter_redacts_configured_secrets`, `test_request_logs_omit_secrets_and_summary`
-- 헤더 `X-Cue-Signature-Version`이 없으면 v1입니다. 값 `2`만 v2입니다. 그 밖의 값은 401입니다. v1은 아직 거절하지 않습니다. [구현] (0.1.0)
-- 검증을 통과해 접수되면 접수 로그에 `signature_version=1` 또는 `2`만 남깁니다. 서명과 비밀은 로그에 넣지 않습니다. 같은 값을 접수 행 `idempotency.signature_version`에 저장합니다. 예전 행은 NULL이고, 그 열이 없으면 열 때만 추가합니다. [구현] (0.1.1)
+- 테스트: `test_v2_hmac_binds_method_path_timestamp_and_body`, `test_v2_signature_binds_method_and_path`, `test_v1_header_is_401`, `test_missing_signature_version_is_401`, `test_v2_header_is_202`, `test_unknown_signature_version_401`, `test_timestamp_inside_window_is_accepted`, `test_timestamp_outside_window_is_unauthorized`, `test_same_signature_replay_is_unauthorized`, `test_secondary_hmac_key_is_accepted`, `test_bearer_and_hmac_are_both_required`, `test_filter_redacts_configured_secrets`, `test_request_logs_omit_secrets_and_summary`, `test_acceptance_log_records_version_not_the_signature`, `test_acceptance_row_stores_signature_version`, `test_old_schema_db_gains_nullable_signature_version`, `test_signature_version_migration_failure_is_503`
+- 검증을 통과해 접수되면 접수 로그와 접수 행에 `signature_version=2`만 남깁니다. 서명과 비밀은 로그에 넣지 않습니다. 예전 행은 NULL이고, 그 열이 없으면 트랜잭션 안에서 한 번만 추가합니다. [구현] (0.1.1, 값은 0.2.0부터 2)
 
 ### 5.2 개선 제안 [일부 구현, 키 교체 절차는 미구현]
 | 항목 | 제안 | 상태 | 테스트(제안) |
 |---|---|---|---|
-| 메서드·경로 결합 | v2: `"v2\n"+METHOD+"\n"+PATH+"\n"+ts+"\n"+raw_body`, 헤더 `X-Cue-Signature-Version: 2`. **0.1.0에 순번 필드와 함께**, v1/v2 동시 수용 전환(5.3) | [구현] (0.1.0). Cue 지원은 미검증 전제. v1은 아직 받음 | `test_v2_signature_binds_method_and_path`, `test_v1_v2_overlap_window`, `test_unknown_signature_version_401` |
+| 메서드·경로 결합 | v2: `"v2\n"+METHOD+"\n"+PATH+"\n"+ts+"\n"+raw_body`, 헤더 `X-Cue-Signature-Version: 2`. 0.2.0부터 v2만 받음 | [구현] (0.2.0). Cue 실제 요청 검증은 [확인] / [confirmed]: 2026-10-30 22:40:43 KST, handoff `20e64635`, `idempotency_key` `cue-20e64635-a1-r1`, journal `signature_version=2`, DB `idempotency.signature_version=2`, outbox `delivered` `attempts=1`, Grok `200`. 운영자(operator)가 읽기 전용으로 확인했다. The operator role checked this read-only. | `test_v2_signature_binds_method_and_path`, `test_v1_header_is_401`, `test_missing_signature_version_is_401`, `test_v2_header_is_202`, `test_unknown_signature_version_401` |
 | 재생 기록 영속화 | SQLite `replay(sig_sha256 PK, ts)`, 접수 행과 같은 트랜잭션, 재시작 후에도 유지, DB 오류면 503(fail closed). 아웃박스 도입 시 같은 DB | 구현(0.0.3, P2) | `test_replay_rejected_after_restart`, `test_replay_store_unavailable_fails_closed` |
 | 키 교체 시점 | 보조에 새 키 → Cue 전환 확인 → 기본 교체 → 보조 비움. **90일마다, 유출 의심 시 즉시**. 값은 서버 환경 파일(권한 600)에만 | 슬롯은 현행, 주기는 [결정, 2026-10-30], 절차는 미구현 | `test_removed_key_is_rejected`, `test_log_shows_key_slot_not_key` |
 | 로그 금지 확장 | 인증 실패 사유만 기록, 비밀·서명·summary 없음 | [구현] (0.0.2) | `test_auth_reason_log_has_no_secret` |
 
-### 5.3 v1과 호환되지 않는 변경의 전환 절차 [구현(수용), v1 거절은 미구현]
-v2 같은 비호환 변경은 아래 절차를 거칩니다.
-1. MINOR + **BREAKING** 버전 PR(12.1). v2는 0.1.0 [구현]
-2. 수용 기간: 헤더 없음 = v1, `X-Cue-Signature-Version: 2` = v2. 둘 다 받음 [구현]
-3. Cue 전환을 사용자(owner)가 확인 [미구현]
-4. v1 거절은 별도 PR, 다시 BREAKING 표기 [미구현]. v1 종료는 제안이며 아직 구현하지 않습니다. 거절은 이후 버전에서 합니다.
-- 테스트: `test_v1_v2_overlap_window`, `test_unknown_signature_version_401` [구현]
+### 5.3 v1 거절 [구현] (0.2.0, BREAKING)
+v2를 도입한 뒤의 전환은 아래와 같습니다.
+1. MINOR + **BREAKING** 버전 PR. v2 도입은 0.1.0, v1 거절은 0.2.0 [구현]
+2. 0.1.x 수용 기간에는 헤더 없음 = v1, `X-Cue-Signature-Version: 2` = v2를 함께 받았습니다. 그 기간은 0.2.0에서 끝났습니다
+3. Cue가 v2로 보낸 것은 [확인]이다. 근거는 2026-10-30 22:40:43 KST의 Cue 실제 요청이다. handoff `20e64635`, `idempotency_key` `cue-20e64635-a1-r1`. 저널은 `signature_version=2`이고 DB `idempotency.signature_version`은 `2`이다. 아웃박스는 `delivered`, `attempts=1`이며 Grok은 `200`을 반환했다. 운영자(operator)가 읽기 전용으로 확인했다. Cue sending v2 is [confirmed]. Evidence is the same real Cue request at 2026-10-30 22:40:43 KST, handoff `20e64635`, idempotency_key `cue-20e64635-a1-r1`. The journal recorded `signature_version=2`, and `idempotency.signature_version` is `2`. The outbox row is `delivered` with `attempts=1`, and Grok returned `200`. The operator role checked this read-only.
+4. v1 거절 [구현] (0.2.0): 헤더가 없거나 값이 `1`이면 `401` `{"error":"unauthorized"}`. 응답 본문에 서명이나 비밀을 넣지 않습니다
+- 테스트: `test_v1_header_is_401`, `test_missing_signature_version_is_401`, `test_v2_header_is_202`, `test_unknown_signature_version_401` [구현]
 
 ## 6. 접수·전달 의미와 아웃박스 [구현]
 
@@ -485,7 +484,7 @@ stateDiagram-v2
 | P5 | 사용자(owner) 이메일 알림(8.1) | 가짜 수신처 dead 1건 → 알림 1건 |
 | P6 | 상태 계약(9절) | `test_transition_table_matches_doc`, `test_terminal_states_never_change`, `test_cancel_report_moves_to_cancelled`, 10.2 테스트들 |
 | P7 | (결정 후) handoff 등록, 404·409 | `test_unknown_handoff_404`, `test_handoff_mismatch_409` |
-| P8 | HMAC v2(메서드·경로) + 5.3 수용 [구현·배포] (0.1.0). 출처: 0.1.0 더미 실서버 확인 6/6 통과. Cue 실제 요청 검증은 [미확인]. v1은 아직 받음 | `test_v2_signature_binds_method_and_path`, `test_v1_v2_overlap_window`, `test_unknown_signature_version_401` |
+| P8 | HMAC v2(메서드·경로) [구현·배포] (0.1.0). v1 거절 [구현] (0.2.0, BREAKING). Cue 실제 요청 검증은 [확인] / [confirmed]: 2026-10-30 22:40:43 KST, handoff `20e64635`, `idempotency_key` `cue-20e64635-a1-r1`, `signature_version=2`, outbox `delivered` `attempts=1`, Grok `200`. 운영자(operator) 읽기 전용. The operator role checked this read-only. | `test_v2_signature_binds_method_and_path`, `test_v1_header_is_401`, `test_missing_signature_version_is_401`, `test_v2_header_is_202`, `test_unknown_signature_version_401` |
 | P9 | T1·T2 감시(둘 다 24시간) | 가짜 시계 → `stale`/`expired` |
 | P10 | (결정 후) completed 검증(4.2) | 정상 / 링크 404 / SHA 없음 |
 | P11 | (결정 후) 취소 | `test_cancel_idempotent`, `test_result_after_cancel_recorded` |
@@ -495,7 +494,7 @@ stateDiagram-v2
 P3은 응답 의미를 바꾸므로(첫 202가 `forwarded:false`) Grok·Cue 공지가 함께 필요합니다.
 
 ### 12.1 버전 관리
-- 루트 `VERSION`은 **0.1.1**입니다. `CHANGELOG.md`와 `CHANGELOG.en.md`가 있습니다. 이 파일들은 PR #2에서 추가되었습니다. `0.0.1`은 main `2483c3b`의 기능과 문서입니다. 앱은 이 파일을 FastAPI `version` 필드에만 읽습니다. 0.1.1은 접수 로그와 접수 행의 `signature_version`입니다. 그 뒤의 문서 교정은 VERSION을 올리지 않고 CHANGELOG의 `Unreleased (docs)`에 둡니다.
+- 루트 `VERSION`은 **0.2.0**입니다. `CHANGELOG.md`와 `CHANGELOG.en.md`가 있습니다. 이 파일들은 PR #2에서 추가되었습니다. `0.0.1`은 main `2483c3b`의 기능과 문서입니다. 앱은 이 파일을 FastAPI `version` 필드에만 읽습니다. 0.1.1은 접수 로그와 접수 행의 `signature_version`입니다. 0.2.0은 v1 거절(BREAKING)입니다.
 - 1.0 전: 문서·버그 = PATCH, 기능 = MINOR, 호환 깨짐(서명·필드) = MINOR + **BREAKING**
 - 버전은 머지되는 PR 안에서 올림. 태그는 사용자(owner) 승인 후에만
 - 목표: P0는 0.0.1 안에 포함(버전 올림 없음), P1 = 0.0.2. **0.1.0 = P13 순번 필드 + P8 HMAC v2 (BREAKING)** [결정]. 0.1.0 전의 비호환 없는 단계는 0.0.x PATCH로 올리고, 0.1.0은 P8과 P13 전용, P3 = 0.0.x PATCH(응답 의미 변경 공지)
@@ -515,7 +514,7 @@ P3은 응답 의미를 바꾸므로(첫 202가 `forwarded:false`) Grok·Cue 공�
 ### 13.1a 확정(사용자(owner), 2026-10-30 17:31–17:34 KST) [결정, 모두 미구현]
 1. 최종 전달 실패 알림 = 사용자(owner) 이메일(8.1). 주소는 문서에 쓰지 않음. 메일 실패 시 journal·`outbox_status.py`
 2. `attempt`/`report_seq`는 0.1.0에 도입(BREAKING) [구현] (0.1.0). 0.0.x의 N1~N5(10.2)는 아직 미구현
-3. HMAC v2는 메서드·경로 포함, 0.1.0에 순번 필드와 함께, v1/v2 동시 수용 [구현] (0.1.0). v1 거절은 별도 PR
+3. HMAC v2는 메서드·경로 포함, 0.1.0에 순번 필드와 함께 도입 [구현] (0.1.0). v1 거절 [구현] (0.2.0, BREAKING)
 4. 키 교체 90일마다, 유출 의심 시 즉시(5.2)
 5. 재시도 첫 시도 포함 7회·총 60분(7.1). Cue 무응답 시간 초과 T1 = 24시간
 6. 늦은 결과·중복 완료·취소 뒤 결과는 표시를 붙여 Grok에 전달, 상태는 유지(9.5)

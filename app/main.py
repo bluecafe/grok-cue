@@ -231,7 +231,6 @@ def create_app(
             bridge.settings.hmac_keys(),
             timestamp,
             raw,
-            version=sig_version,
             method=request.method,
             path=request.url.path,
         ):

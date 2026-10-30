@@ -2,7 +2,7 @@
 
 # Changelog
 
-The current version is `0.1.1`. The value lives in [`VERSION`](VERSION) at the repository root. The app reads that file only for the FastAPI `version` field. No response body, including `/healthz`, includes the version.
+The current version is `0.2.0`. The value lives in [`VERSION`](VERSION) at the repository root. The app reads that file only for the FastAPI `version` field. No response body, including `/healthz`, includes the version.
 
 ## Version rules
 
@@ -32,6 +32,26 @@ Pre-1.0, and bumped in a SemVer-like way.
 - The 2026-10-29 E2E is one successful request record. Grok-side receipt was confirmed separately by Norn (user) at 16:05 KST.
 - In docs and READMEs the owner is 노른(사용자) in Korean and Norn (user) in English. There was no existing personal-name wording to replace.
 - Versioning was added only in `VERSION`, this changelog, and one README line. Application code was not changed, and no tag was created.
+
+## 0.2.0 — 2026-10-30
+
+MINOR and **BREAKING**. HMAC v1 is rejected.
+
+### Breaking changes
+
+- A missing `X-Cue-Signature-Version` header, or the value `1`, returns `401` `{"error":"unauthorized"}`. The response body contains no signature and no secret. Only `2` is accepted.
+- The verification path computes only the v2 input (`v2`, METHOD, PATH, timestamp, raw_body).
+
+### Features
+
+- A verified acceptance logs and stores only `signature_version=2`.
+- Adding the `signature_version` column runs in one transaction. If that migration fails, the response is `503 storage_unavailable`.
+
+### Deployment and senders
+
+- This PR does not deploy. Deployment needs separate approval from 노른(사용자).
+- Senders must send `X-Cue-Signature-Version: 2` and sign `v2`, METHOD, PATH, timestamp, and raw_body joined by newlines. Example: METHOD `POST`, PATH `/v1/cue/tasks`, host `hook.example.com`. A v1 sender, with the header missing or set to `1`, now receives `401`.
+- `signature_version` NULL on a row recorded before 0.1.1 means the column did not exist yet. It does not mean the signature failed, and it does not mean version 1. Acceptances after 0.2.0 store only `2`.
 
 ## 0.1.1 — 2026-10-30
 

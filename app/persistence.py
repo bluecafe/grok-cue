@@ -471,11 +471,17 @@ class StateDB:
 
     def _add_signature_version_column(self, conn: sqlite3.Connection) -> None:
         """Add the nullable acceptance column once. Existing rows stay NULL."""
-        names = {
-            str(row[1]) for row in conn.execute("PRAGMA table_info(idempotency)").fetchall()
-        }
-        if "signature_version" not in names:
-            conn.execute("ALTER TABLE idempotency ADD COLUMN signature_version INTEGER")
+        self._begin(conn)
+        try:
+            names = {
+                str(row[1]) for row in conn.execute("PRAGMA table_info(idempotency)").fetchall()
+            }
+            if "signature_version" not in names:
+                conn.execute("ALTER TABLE idempotency ADD COLUMN signature_version INTEGER")
+            self._commit(conn)
+        except sqlite3.Error:
+            self._safe_rollback(conn)
+            raise
 
     def _restrict(self, path: str) -> None:
         for candidate in (path, path + "-wal", path + "-shm"):

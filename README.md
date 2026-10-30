@@ -2,7 +2,7 @@
 
 # grok-cue
 
-현재 버전: `0.1.1` ([VERSION](VERSION), [변경 기록](CHANGELOG.md))
+현재 버전: `0.2.0` ([VERSION](VERSION), [변경 기록](CHANGELOG.md))
 
 grok-cue는 두 AI 비서 서비스 사이에 놓이는 작은 "접수 창구" 서버입니다. 하나는 Manus가 만든 개인용 에이전트 앱 [Cue](https://cue.im/)이고, 다른 하나는 클라우드 컴퓨터에서 일하는 xAI의 에이전트 [Grok Bot](https://docs.x.ai/grok-bot/overview)입니다.
 두 비서는 끝낸 일을 서로에게 직접 넘겨줄 방법이 없습니다. grok-cue는 Cue 쪽이 서명해서 보낸 "작업 완료" 알림을 HTTP로 받고, 설정해 두었다면 Grok Bot 웹훅으로 접수한 내용을 JSON으로 넘깁니다.
@@ -18,14 +18,14 @@ grok-cue는 두 AI 비서 서비스 사이에 놓이는 작은 "접수 창구" �
 
 ## 되는 것
 
-- `POST /v1/cue/tasks`로 작업 인계 알림을 받습니다. Bearer 토큰과 HMAC-SHA256 서명이 **둘 다** 맞아야 하고, 허용 시각 차이는 ±300초입니다. 버전 헤더가 없으면 서명 대상은 `{timestamp}.{raw_body}`(v1)입니다. `X-Cue-Signature-Version: 2`이면 `v2`, 메서드, 경로, 시각, 본문을 줄바꿈으로 잇습니다.
+- `POST /v1/cue/tasks`로 작업 인계 알림을 받습니다. Bearer 토큰과 HMAC-SHA256 서명이 **둘 다** 맞아야 하고, 허용 시각 차이는 ±300초입니다. `X-Cue-Signature-Version: 2`가 필요합니다. 서명 대상은 `v2`, 메서드, 경로, 시각, 본문을 줄바꿈으로 이은 값입니다. 헤더가 없거나 `1`이면 `401`입니다.
 - 인증에 성공한 서명은 한 번만 쓸 수 있습니다. 같은 서명을 다시 보내면 `401`입니다.
 - 키를 바꾸는 동안 서비스를 멈추지 않도록 기본 토큰·키와 보조 토큰·키를 함께 받습니다.
 - `idempotency_key`로 중복을 막습니다. 같은 바이트면 처음의 `202`를 그대로 돌려주고, 다른 바이트면 `409`입니다.
 - 본문을 엄격하게 검사합니다(64 KiB 제한, `application/json`, `github_ref` 형식, 어디에도 `task_id` 금지).
 - `reply_to`는 환경 변수로 정한 메일 주소 허용 목록 안에서만 받습니다.
 - 선택적으로, 정해진 10개 필드(`handoff_id`, `attempt`, `report_seq`, `repo`, `github_ref`, `status`, `summary`, `links`, `next_owner`, `idempotency_key`)([스펙](docs/DESIGN.md#스펙))만 `GROK_WEBHOOK_URL`로 전달합니다. 한 시도의 HTTP 제한 시간은 5초입니다. 재시도는 첫 시도를 포함해 최대 7회, 첫 시도 시작부터 60분 안입니다.
-- 토큰, 키, 서명 같은 비밀과 요청 본문은 로그에 남기지 않습니다. 검증을 통과해 접수되면 로그에는 `signature_version=1` 또는 `2`만 남고, 같은 정수를 접수 행에 저장합니다. 응답 본문에는 버전을 넣지 않습니다.
+- 토큰, 키, 서명 같은 비밀과 요청 본문은 로그에 남기지 않습니다. 검증을 통과해 접수되면 로그와 접수 행에는 `signature_version=2`만 남습니다. 응답 본문에는 버전을 넣지 않습니다.
 - `GET /healthz`로 서버가 켜져 있는지 확인할 수 있습니다.
 
 `CUE_STATE_DB`가 있으면 접수, 서명 재생 방지, 아웃박스는 그 SQLite 파일에 남습니다. 비어 있으면 프로세스 메모리뿐이라 재시작하면 사라집니다.
@@ -114,10 +114,9 @@ Cue가 Bearer와 HMAC 서명 헤더를 붙인 POST를 직접 보낼 수 있는�
 - `Authorization: Bearer <CUE_BRIDGE_TOKEN>`
 - `X-Cue-Timestamp`: Unix 초. 서버 시각과 ±300초 이내
 - `X-Cue-Signature`: HMAC-SHA256 hex. hex 대소문자는 구분하지 않고, `sha256=` 접두사는 거절됩니다.
-- 버전 헤더가 없으면 v1입니다. 입력은 `{timestamp}.{raw_body}`입니다.
-- `X-Cue-Signature-Version: 2`이면 v2입니다. 입력은 `v2`, METHOD, PATH, timestamp, raw_body를 줄바꿈으로 이은 값입니다. 예: METHOD `POST`, PATH `/v1/cue/tasks`.
-- 그 밖의 버전 값은 `401`입니다. v1은 아직 거절하지 않습니다. v1 거절은 이후 버전의 제안이며 아직 구현하지 않습니다.
-- 검증을 통과해 접수되면 로그와 접수 행에 `signature_version` `1` 또는 `2`를 남깁니다. 서명 문자열은 로그에 넣지 않습니다.
+- `X-Cue-Signature-Version: 2`가 필요합니다. 입력은 `v2`, METHOD, PATH, timestamp, raw_body를 줄바꿈으로 이은 값입니다. 예: METHOD `POST`, PATH `/v1/cue/tasks`.
+- 헤더가 없거나 `1`이거나 그 밖의 값이면 `401` `{"error":"unauthorized"}`입니다. 응답 본문에 서명이나 비밀을 넣지 않습니다.
+- 검증을 통과해 접수되면 로그와 접수 행에 `signature_version=2`만 남깁니다. 서명 문자열은 로그에 넣지 않습니다.
 
 다시 보낼 때는 본문 바이트를 그대로 두고 시각과 서명만 새로 계산합니다.
 
@@ -127,9 +126,10 @@ Cue가 Bearer와 HMAC 서명 헤더를 붙인 POST를 직접 보낼 수 있는�
 TOKEN='replace-with-bearer-token'; KEY='replace-with-hmac-key'
 TS="$(date +%s)"
 BODY='{"schema_version":"1","handoff_id":"00000000-0000-4000-8000-000000000000","attempt":1,"report_seq":1,"repo":"owner/name","github_ref":{"repo":"owner/name","base_branch":"main","start_sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"idempotency_key":"example-key-1","title":"example","status":"completed","summary":"example summary","created_at":"2026-10-29T00:00:00Z","links":[],"next_owner":"example"}'
-SIG="$(printf '%s.%s' "$TS" "$BODY" | openssl dgst -sha256 -hmac "$KEY" -hex | awk '{print $NF}')"
+SIG="$(printf 'v2\nPOST\n/v1/cue/tasks\n%s\n%s' "$TS" "$BODY" | openssl dgst -sha256 -hmac "$KEY" -hex | awk '{print $NF}')"
 curl -sS -D - http://127.0.0.1:8160/v1/cue/tasks \
   -H "Authorization: Bearer $TOKEN" -H "X-Cue-Timestamp: $TS" -H "X-Cue-Signature: $SIG" \
+  -H "X-Cue-Signature-Version: 2" \
   -H "Content-Type: application/json" --data-binary "$BODY"
 ```
 

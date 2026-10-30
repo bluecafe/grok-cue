@@ -2,7 +2,7 @@
 
 # 변경 기록
 
-현재 버전은 `0.1.1`입니다. 값은 저장소 루트의 [`VERSION`](VERSION)에 둡니다. 앱은 이 파일을 FastAPI `version` 필드에만 읽습니다. `/healthz`를 포함한 응답 본문에는 버전을 넣지 않습니다.
+현재 버전은 `0.2.0`입니다. 값은 저장소 루트의 [`VERSION`](VERSION)에 둡니다. 앱은 이 파일을 FastAPI `version` 필드에만 읽습니다. `/healthz`를 포함한 응답 본문에는 버전을 넣지 않습니다.
 
 ## 버전 규칙
 
@@ -32,6 +32,26 @@
 - 2026-10-29 E2E는 성공한 요청 기록 한 건입니다. Grok 쪽 수신은 노른(사용자)가 16:05 KST에 따로 확인했습니다.
 - 문서와 README에서 소유자는 한국어로 노른(사용자), 영어로 Norn (user)입니다. 실명으로 바꿀 기존 표기는 없었습니다.
 - 버전 관리를 `VERSION`, 이 기록, README의 한 줄에만 추가했습니다. 앱 코드는 바꾸지 않았고, 태그는 만들지 않았습니다.
+
+## 0.2.0 — 2026-10-30
+
+MINOR + **BREAKING**. v1 HMAC을 거절합니다.
+
+### 깨지는 변경
+
+- `X-Cue-Signature-Version`이 없거나 `1`이면 `401` `{"error":"unauthorized"}`입니다. 응답 본문에 서명이나 비밀을 넣지 않습니다. `2`만 받습니다.
+- 검증 경로는 v2 입력(`v2`, METHOD, PATH, timestamp, raw_body)만 계산합니다.
+
+### 기능
+
+- 검증을 통과해 접수되면 로그와 접수 행에는 `signature_version=2`만 남습니다.
+- 접수 행에 `signature_version` 열을 더하는 마이그레이션은 하나의 트랜잭션입니다. 실패하면 `503 storage_unavailable`입니다.
+
+### 배포와 보내는 쪽
+
+- 이 PR은 배포를 포함하지 않습니다. 배포는 노른(사용자)의 별도 승인이 필요합니다.
+- 보내는 쪽은 `X-Cue-Signature-Version: 2`를 붙이고, `v2`, METHOD, PATH, timestamp, raw_body를 줄바꿈으로 이은 값에 서명합니다. 예: METHOD `POST`, PATH `/v1/cue/tasks`, 호스트 `hook.example.com`. 헤더가 없거나 `1`인 v1 송신은 이제 `401`입니다.
+- 0.1.1 이전에 기록된 접수 행의 `signature_version`이 NULL인 것은 그때 그 열이 없었기 때문입니다. 서명이 실패했다는 뜻도, 버전이 1이라는 뜻도 아닙니다. 0.2.0 이후의 새 접수는 `2`만 저장합니다.
 
 ## 0.1.1 — 2026-10-30
 

@@ -4,17 +4,17 @@ import logging
 
 import pytest
 
-from app.auth import hmac_sha256_hex
+from app.auth import hmac_v2_hex
 from tests.conftest import Harness
 from tests.support import HMAC_KEY, TOKEN, sign, sign_v2, task_body
 
-PINNED_HMAC = "bbb8be9666a8373efa71ffb4bbed69890ab4d7572cba1792c6bfede89cabdbef"
+PINNED_V2 = "7d605e7bfd76f7ab92a251d257f12982aa9b73f7f1c910af6bbfc2243a84dedc"
 
 
-def test_hmac_is_sha256_of_timestamp_dot_raw_body() -> None:
+def test_v2_hmac_binds_method_path_timestamp_and_body() -> None:
     body = b"{}"
     timestamp = "1700000000"
-    assert hmac_sha256_hex(HMAC_KEY, timestamp, body) == PINNED_HMAC
+    assert hmac_v2_hex(HMAC_KEY, "POST", "/v1/cue/tasks", timestamp, body) == PINNED_V2
 
 
 @pytest.mark.parametrize("offset", [0, 300, -300])
@@ -55,7 +55,7 @@ def test_wrong_signature_is_unauthorized(harness: Harness) -> None:
 def test_sha256_prefix_is_not_the_signature_format(harness: Harness) -> None:
     body = task_body()
     timestamp = str(int(harness.now))
-    prefixed = "sha256=" + hmac_sha256_hex(HMAC_KEY, timestamp, body)
+    prefixed = "sha256=" + sign_v2(HMAC_KEY, "POST", "/v1/cue/tasks", timestamp, body)
     response = harness.post(body, signature=prefixed)
     assert response.status_code == 401
 
@@ -73,7 +73,7 @@ def test_same_signature_replay_is_unauthorized(harness: Harness) -> None:
 def test_uppercase_signature_is_the_same_signature(harness: Harness) -> None:
     body = task_body()
     timestamp = str(int(harness.now))
-    signature = hmac_sha256_hex(HMAC_KEY, timestamp, body).upper()
+    signature = sign_v2(HMAC_KEY, "POST", "/v1/cue/tasks", timestamp, body).upper()
     first = harness.post(body, signature=signature)
     assert first.status_code == 202
     second = harness.post(body, signature=signature.lower())
@@ -176,31 +176,39 @@ def test_v2_signature_binds_method_and_path(harness: Harness) -> None:
 
     naked = task_body(idempotency_key="idem-v2-naked", report_seq=5)
     naked_sig = sign_v2(HMAC_KEY, "POST", "/v1/cue/tasks", str(ts + 4), naked)
-    rejected_naked = harness.post(naked, timestamp=ts + 4, signature=naked_sig)
+    rejected_naked = harness.post(naked, timestamp=ts + 4, signature=naked_sig, omit_version=True)
     assert rejected_naked.status_code == 401
     assert rejected_naked.json() == {"error": "unauthorized"}
 
 
-def test_v1_v2_overlap_window(harness: Harness) -> None:
-    v1 = harness.post(task_body(idempotency_key="idem-overlap-v1", report_seq=1))
-    v2 = harness.post(
-        task_body(idempotency_key="idem-overlap-v2", report_seq=2),
-        timestamp=int(harness.now) + 1,
-        signature_version="2",
-    )
-    padded = harness.post(
-        task_body(idempotency_key="idem-overlap-pad", report_seq=3),
-        timestamp=int(harness.now) + 2,
-        signature_version=" 2 ",
-    )
-    v1_again = harness.post(
-        task_body(idempotency_key="idem-overlap-v1b", report_seq=4),
-        timestamp=int(harness.now) + 3,
-    )
-    assert v1.status_code == 202
-    assert v2.status_code == 202
-    assert padded.status_code == 202
-    assert v1_again.status_code == 202
+def test_v1_header_is_401(harness: Harness) -> None:
+    body = task_body(idempotency_key="idem-reject-v1")
+    timestamp = str(int(harness.now))
+    signature = sign(HMAC_KEY, timestamp, body)
+    response = harness.post(body, signature=signature, signature_version="1")
+    assert response.status_code == 401
+    assert response.json() == {"error": "unauthorized"}
+    assert signature not in response.text
+    assert HMAC_KEY not in response.text
+    assert harness.notifier.events == []
+
+
+def test_missing_signature_version_is_401(harness: Harness) -> None:
+    body = task_body(idempotency_key="idem-reject-missing")
+    timestamp = str(int(harness.now))
+    signature = sign(HMAC_KEY, timestamp, body)
+    response = harness.post(body, signature=signature, omit_version=True)
+    assert response.status_code == 401
+    assert response.json() == {"error": "unauthorized"}
+    assert signature not in response.text
+    assert HMAC_KEY not in response.text
+    assert harness.notifier.events == []
+
+
+def test_v2_header_is_202(harness: Harness) -> None:
+    response = harness.post(task_body(idempotency_key="idem-accept-v2"), signature_version="2")
+    assert response.status_code == 202
+    assert harness.notifier.events[0][3] == 2
 
 
 def test_unknown_signature_version_401(

@@ -65,7 +65,7 @@ HTTP `202`는 접수를 커밋한 뒤의 응답이다. `CUE_STATE_DB`가 있으�
 
 - `Authorization: Bearer <CUE_BRIDGE_TOKEN>`
 - `X-Cue-Timestamp`: Unix 초. 서버 시각과 ±300초
-- `X-Cue-Signature`: HMAC-SHA256 hex(대소문자 구분 없음). 버전 헤더가 없으면 입력은 `{timestamp}.{raw_body}`이다. `X-Cue-Signature-Version: 2`이면 `v2`, METHOD, PATH, timestamp, raw_body를 줄바꿈으로 잇는다. `sha256=`은 붙이지 않는다. 그 밖의 버전은 401이다. v1은 아직 받는다. 검증을 통과해 접수되면 로그와 접수 행에 `signature_version` `1` 또는 `2`만 남는다. 서명 문자열은 로그에 넣지 않는다
+- `X-Cue-Signature`: HMAC-SHA256 hex(대소문자 구분 없음). `X-Cue-Signature-Version: 2`가 필요하다. 입력은 `v2`, METHOD, PATH, timestamp, raw_body를 줄바꿈으로 잇는다. `sha256=`은 붙이지 않는다. 헤더가 없거나 `1`이거나 그 밖의 값이면 `401` `{"error":"unauthorized"}`이다. 응답에 서명이나 비밀을 넣지 않는다. 검증을 통과해 접수되면 로그와 접수 행에 `signature_version=2`만 남는다
 - `Content-Type: application/json`
 - 키는 `CUE_BRIDGE_HMAC_KEY`다. 교체 창이면 secondary도 받는다
 - Bearer와 HMAC가 둘 다 맞아야 한다
