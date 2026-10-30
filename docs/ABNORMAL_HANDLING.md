@@ -41,10 +41,10 @@
 | 신호 | 뜻 | 근거 |
 |---|---|---|
 | `202` | **Bridge가 접수했다.** `CUE_STATE_DB`가 있으면 SQLite에 남고, 비어 있으면 메모리뿐이라 재시작하면 잊음 | [구현] `main.py: create_task`, `app/persistence.py: StateDB`. 비어 있을 때는 `store.py: IdempotencyStore` |
-| `forwarded: true` | **Bridge의 전달 주장.** 현재는 "이 요청에서 전달을 예약했다"는 뜻. Grok 2xx 확인이 아님 | [현행 구현] `main.py`: `background_tasks.add_task(...)` 직후 `scheduled = True`, 응답 `forwarded = scheduled`. 실패는 `forward.py: GrokForwarder.send`가 로그만 남김 |
+| `forwarded: true` | **그 아웃박스 행이 Grok 2xx를 기록했다.** 첫 `202`는 그 전에 나가므로 `false`다 | [구현] `main.py`가 응답 전에 `outbox.view`를 읽고, 2xx 뒤에만 `delivered` |
 | Grok 실제 수신 | Grok의 회신이나 사람의 별도 확인으로만 압니다 | 10-29 시험은 사용자(owner) 확인 |
 
-참고 [현행 구현]: 같은 키·같은 바디 재전송의 응답은 `forwarded: false`입니다(`main.py`, `result.created`가 false면 `scheduled=False`).
+참고 [구현]: 같은 키·같은 바디 재전송은 다시 전달하지 않습니다. `forwarded`는 그때의 아웃박스 상태입니다(`main.py`, `outbox.view`).
 
 ### 1.3 Cue가 할 수 있는 일 [미검증 전제, 10-29 단건만 확인]
 Cue는 새 작업 메일을 받으면 ① 명세와 GitHub 참조를 확인하고 ② 맡은 일을 마친 뒤 ③ 서명 POST를 **단건** 보낼 수 있습니다. 자동 감시·heartbeat·주기 보고는 없습니다 [결정]. 재시도·취소 확인 등 그 밖의 Cue 동작은 모두 [미검증 전제]입니다.
@@ -54,7 +54,7 @@ Cue는 새 작업 메일을 받으면 ① 명세와 GitHub 참조를 확인하�
 |---|---|---|
 | Grok 측 | handoff 메일 작성, `handoff_id` 발급, GitHub 참조와 명세 전달 | Cue 산출물 대신 작성 |
 | Cue | 메일 확인 → 참조 확인(4절) → 불일치면 추측 없이 `needs_input` → 명시된 저장소·브랜치·경로 안에서만 작업 → 서명 POST 1건 | Grok 코드, 메일 루틴, Bridge 수신기, 시크릿, 인프라 수정 |
-| Bridge | 서명 검증, 접수, 8필드 전달 [현행 구현]. 상태 기록 [구현] | 작업 실행, 메일 발송, 머지·배포·결제 |
+| Bridge | 서명 검증, 접수, 10필드 전달, `forward_state` [구현]. handoff 상태 계약(9절)은 [제안·미구현] | 작업 실행, 메일 발송, 머지·배포·결제 |
 | 사용자(owner) | 승인 권한. 재개·종료, 키 교체 | — |
 
 인계·`202`·`forwarded`·`completed`는 머지·배포·결제 승인이 아닙니다 [결정]. 응답은 항상 `executed: false`입니다 [현행 구현] (`main.py`, `test_successful_forward_is_scheduled_and_not_execution`).
@@ -92,15 +92,15 @@ Cue 실행이 쓰는 GitHub App, 토큰, 또는 브라우저 세션이 그 순�
 | S2 | Cue 확인·작업 | Bridge 밖 |
 | S3 | `POST https://hook.example.com/v1/cue/tasks` | `main.py: create_task` |
 | S3a | 인증 전 64 KiB 제한 | `MAX_BODY_BYTES`, `read_limited_body` |
-| S3b | 타임스탬프 ±300초 → Bearer + HMAC v1 | `auth.py` |
-| S3c | 서명 재사용 거절(메모리, 600초) | `auth.py: ReplayCache` |
-| S3d | Content-Type, JSON, `task_id` 금지, reply_to, 13필드 스키마 | `main.py`, `models.py`, `reply_to.py` |
-| S3e | idempotency 판정(메모리, 바디 SHA-256) | `store.py: IdempotencyStore.register` |
-| S4 | 첫 접수 로그 | `notify.py: LogNotifier` |
-| S5 | 8필드 POST 1회, 5초, 실패는 로그만 | `forward.py: GrokForwarder.send` |
-| S6 | `202 {handoff_id, status: received, executed: false, forwarded}` | `main.py` |
+| S3b | 타임스탬프 ±300초 → Bearer + HMAC v1 또는 v2 | `auth.py` |
+| S3c | 서명 재사용 거절(600초). `CUE_STATE_DB`가 있으면 SQLite, 비면 메모리 | `persistence.py`, `auth.py: ReplayCache` |
+| S3d | Content-Type, JSON, `task_id` 금지, reply_to, 15필드 스키마 | `main.py`, `models.py`, `reply_to.py` |
+| S3e | idempotency 판정(바디 SHA-256). DB가 있으면 SQLite, 비면 메모리 | `persistence.py`, `store.py` |
+| S4 | 첫 접수 로그. `signature_version=1` 또는 `2`만, 서명 값은 없음 | `notify.py: LogNotifier` |
+| S5 | 10필드 전달. 시도당 5초, 최대 7회·60분. 실패는 재시도 또는 `dead` | `forward.py: GrokForwarder.attempt`, `outbox.py` |
+| S6 | `202`에 `handoff_id`, `status: received`, `executed: false`, `forwarded`, `forward_state` | `main.py` |
 
-주의: S6 응답은 S5보다 먼저 나갑니다(BackgroundTask). 그래서 `forwarded: true`는 전달 결과가 아닙니다.
+주의: 첫 `202`는 전달 시도가 끝나기 전에 나갑니다. 그래서 그때 `forwarded`는 `false`이고, 웹훅이 켜져 있으면 `forward_state`는 `queued`입니다. `forwarded: true`는 그 뒤에 Grok 2xx가 기록된 경우뿐입니다.
 
 ## 4. GitHub 검증 책임 분리
 
@@ -136,19 +136,19 @@ Cue 실행이 쓰는 GitHub App, 토큰, 또는 브라우저 세션이 그 순�
 - `timestamp`: `X-Cue-Timestamp`, 공백 제거, 숫자 12자리 이하, `|now - ts| ≤ 300초`. 벗어나면 JSON 해석 전 401
 - 서명: `X-Cue-Signature`, 대소문자 무관, `sha256=` 접두어 불가. Bearer와 HMAC이 **둘 다** 맞아야 함
 - 메서드·경로는 서명에 **들어가지 않음**
-- 재생 방지: 인증 통과 서명을 메모리에 600초 기억. **재시작하면 잊음**
+- 재생 방지: 인증 통과 서명을 600초 기억. `CUE_STATE_DB`가 있으면 SQLite라 재시작 후에도 남고, 비어 있으면 메모리뿐이라 재시작하면 잊음 [구현]
 - 키: 기본·보조 토큰과 HMAC 키 각 1개(`settings.py`)
 - 테스트: `test_hmac_is_sha256_of_timestamp_dot_raw_body`, `test_timestamp_inside_window_is_accepted`, `test_timestamp_outside_window_is_unauthorized`, `test_same_signature_replay_is_unauthorized`, `test_secondary_hmac_key_is_accepted`, `test_bearer_and_hmac_are_both_required`, `test_filter_redacts_configured_secrets`, `test_request_logs_omit_secrets_and_summary`
 - 헤더 `X-Cue-Signature-Version`이 없으면 v1입니다. 값 `2`만 v2입니다. 그 밖의 값은 401입니다. v1은 아직 거절하지 않습니다. [구현] (0.1.0)
 - 검증을 통과해 접수되면 접수 로그에 `signature_version=1` 또는 `2`만 남깁니다. 서명과 비밀은 로그에 넣지 않습니다. 같은 값을 접수 행 `idempotency.signature_version`에 저장합니다. 예전 행은 NULL이고, 그 열이 없으면 열 때만 추가합니다. [구현] (0.1.1)
 
-### 5.2 개선 제안 [제안·미구현, 일부 결정]
+### 5.2 개선 제안 [일부 구현, 키 교체 절차는 미구현]
 | 항목 | 제안 | 상태 | 테스트(제안) |
 |---|---|---|---|
 | 메서드·경로 결합 | v2: `"v2\n"+METHOD+"\n"+PATH+"\n"+ts+"\n"+raw_body`, 헤더 `X-Cue-Signature-Version: 2`. **0.1.0에 순번 필드와 함께**, v1/v2 동시 수용 전환(5.3) | [구현] (0.1.0). Cue 지원은 미검증 전제. v1은 아직 받음 | `test_v2_signature_binds_method_and_path`, `test_v1_v2_overlap_window`, `test_unknown_signature_version_401` |
 | 재생 기록 영속화 | SQLite `replay(sig_sha256 PK, ts)`, 접수 행과 같은 트랜잭션, 재시작 후에도 유지, DB 오류면 503(fail closed). 아웃박스 도입 시 같은 DB | 구현(0.0.3, P2) | `test_replay_rejected_after_restart`, `test_replay_store_unavailable_fails_closed` |
 | 키 교체 시점 | 보조에 새 키 → Cue 전환 확인 → 기본 교체 → 보조 비움. **90일마다, 유출 의심 시 즉시**. 값은 서버 환경 파일(권한 600)에만 | 슬롯은 현행, 주기는 [결정, 2026-10-30], 절차는 미구현 | `test_removed_key_is_rejected`, `test_log_shows_key_slot_not_key` |
-| 로그 금지 확장 | 인증 실패 사유만 기록, 비밀·서명·summary 없음 | 제안 | `test_auth_reason_log_has_no_secret` |
+| 로그 금지 확장 | 인증 실패 사유만 기록, 비밀·서명·summary 없음 | [구현] (0.0.2) | `test_auth_reason_log_has_no_secret` |
 
 ### 5.3 v1과 호환되지 않는 변경의 전환 절차 [구현(수용), v1 거절은 미구현]
 v2 같은 비호환 변경은 아래 절차를 거칩니다.
@@ -264,7 +264,7 @@ v2 같은 비호환 변경은 아래 절차를 거칩니다.
 | `cancelled` | 취소 확정 | **예** | 불가(새 handoff_id) |
 | `expired` | 기한 초과 또는 사용자(owner) 종료 | **예** | 불가(새 handoff_id) |
 
-`status` 값은 8필드 계약상 `in_progress | needs_input | completed | failed` 4개뿐입니다 [현행 구현, `test_old_or_unknown_status_is_rejected`]. 나머지는 Bridge/Grok 내부 상태입니다.
+`status` 값은 요청 필드상 `in_progress | needs_input | completed | failed` 4개뿐입니다 [구현, `test_old_or_unknown_status_is_rejected`]. 나머지는 Bridge/Grok 내부 상태입니다.
 
 ### 9.2 전이표 (여기 없는 전이는 없음)
 | # | 현재 | 사건 | 다음 |
@@ -340,7 +340,7 @@ stateDiagram-v2
 ### 9.4 취소 규칙 (기존 B7과 `cancelled` 정의를 하나로)
 1. 취소는 Grok 측이 등록합니다 → `cancel_requested`(T19). 같은 handoff에 두 번 등록해도 한 번으로 봅니다.
 2. Cue는 자동 감시가 없어 실행 중에는 취소를 모릅니다 [결정]. 다음 메일(취소 메일)을 처리할 때 멈춥니다 [미검증 전제].
-3. 취소 보고 형식(8필드 안): `status: "failed"`, `summary` 첫 줄 `[cancelled]`. `cancel_requested`에서 이 보고가 오면 `cancelled`(T20). `cancel_requested`가 아닐 때 온 `[cancelled]` 보고는 일반 `failed`(T05)로 봅니다.
+3. 취소 보고 형식(전달 10필드 안): `status: "failed"`, `summary` 첫 줄 `[cancelled]`. `cancel_requested`에서 이 보고가 오면 `cancelled`(T20). `cancel_requested`가 아닐 때 온 `[cancelled]` 보고는 일반 `failed`(T05)로 봅니다.
 4. 취소 보고가 T1 안에 없으면 `cancelled`(T21).
 5. `cancelled`는 terminal입니다. 재개는 새 handoff_id로만.
 
@@ -472,14 +472,14 @@ stateDiagram-v2
 2. 검토 PR 머지는 운영자(operator)가 한다. 머지할 때 반영 PR 링크를 댓글로 남긴다. 우리는 Cue 브랜치에 커밋하지 않는다. [현행]
 3. `needs_input` 상태인 handoff는 반영이 끝난 뒤 사용자(owner)가 회신 메일을 보내면 `completed`로 닫는다. 회신 메일은 기획(planner)이 초안을 만들고, 발송은 사용자(owner)가 한다. [현행]
 
-## 12. 단계별 구현 계획 [제안·미구현] (작은 PR, 로컬 pytest, GitHub Actions 없음)
+## 12. 단계별 구현 계획 (완료 행은 [구현], 나머지는 [제안·미구현]. 작은 PR, 로컬 pytest, GitHub Actions 없음)
 - 새 스크립트는 dry-run 기본, `--send`일 때만 전송. 테스트는 MockTransport, 외부 전송 0건.
 
 | PR | 내용 | 수용 테스트(제안) |
 |---|---|---|
-| P0 | 문서. PR #2에 이미 있음: `forwarded`를 "전달 예약"으로 정정, `AI_SETUP.md`의 "접수되고 전달되었다" 정정, `VERSION` 0.0.1, `CHANGELOG.md`, `CHANGELOG.en.md`. 이 설계 문서 추가는 이 파일입니다. | 문서 리뷰, `test_spec.py` 통과 |
-| P1 | 전달 결과 분류, 인증 실패 사유 로그 | `test_forward_outcome_classification`, `test_auth_reason_log_has_no_secret` |
-| P2 | SQLite 접수·replay, 202 전 커밋, 실패 503 | `test_replay_rejected_after_restart`, `test_same_key_after_restart_returns_stored`, `test_replay_store_unavailable_fails_closed` |
+| P0 | 문서 [구현] (0.0.1). PR #2: `VERSION` 0.0.1, `CHANGELOG.md`, `CHANGELOG.en.md`. 이 설계 문서 추가도 그 계열입니다. 당시의 `forwarded` 문장은 그 버전의 기록입니다. | 문서 리뷰, `test_spec.py` 통과 |
+| P1 | 전달 결과 분류, 인증 실패 사유 로그 [구현] (0.0.2) | `test_forward_outcome_classification`, `test_auth_reason_log_has_no_secret` |
+| P2 | SQLite 접수·replay, 202 전 커밋, 실패 503 [구현] (0.0.3) | `test_replay_rejected_after_restart`, `test_same_key_after_restart_returns_stored`, `test_replay_store_unavailable_fails_closed` |
 | P3 | 아웃박스·`forward_state`·재시도·dead [구현] (0.0.4) | `test_forwarded_true_only_after_2xx`, `test_first_202_is_queued`, `test_replay_returns_original_body_with_state`, `test_replay_never_reforwards_queued_delivered_dead`, `test_seven_attempts_including_first_then_dead`, `test_retry_after_overrides_backoff_capped`, `test_sixty_minute_budget_from_first_attempt`, `test_4xx_is_dead_immediately`, `test_sending_row_resent_after_restart`, `test_retry_runs_as_time_passes_without_a_new_request`, `test_startup_pump_recovers_sending_and_due_rows`, `test_concurrent_pump_does_not_double_send`, `test_worker_delivers_on_the_cycle_after_pump_raises`, `test_finish_uses_time_after_the_attempt` |
 | P4 | `redeliver.py`·`outbox_status.py` | `test_redeliver_dry_run_sends_nothing`, `test_redeliver_send_only_with_flag`, `test_redeliver_appends_run_keeps_history`, `test_alert_payload_has_no_secret_source_or_diff` |
 | P5 | 사용자(owner) 이메일 알림(8.1) | 가짜 수신처 dead 1건 → 알림 1건 |
@@ -495,7 +495,7 @@ stateDiagram-v2
 P3은 응답 의미를 바꾸므로(첫 202가 `forwarded:false`) Grok·Cue 공지가 함께 필요합니다.
 
 ### 12.1 버전 관리
-- 루트 `VERSION`은 **0.1.1**입니다. `CHANGELOG.md`와 `CHANGELOG.en.md`가 있습니다. 이 파일들은 PR #2에서 추가되었습니다. `0.0.1`은 main `2483c3b`의 기능과 문서입니다. 앱은 이 파일을 FastAPI `version` 필드에만 읽습니다.
+- 루트 `VERSION`은 **0.1.1**입니다. `CHANGELOG.md`와 `CHANGELOG.en.md`가 있습니다. 이 파일들은 PR #2에서 추가되었습니다. `0.0.1`은 main `2483c3b`의 기능과 문서입니다. 앱은 이 파일을 FastAPI `version` 필드에만 읽습니다. 0.1.1은 접수 로그와 접수 행의 `signature_version`입니다. 그 뒤의 문서 교정은 VERSION을 올리지 않고 CHANGELOG의 `Unreleased (docs)`에 둡니다.
 - 1.0 전: 문서·버그 = PATCH, 기능 = MINOR, 호환 깨짐(서명·필드) = MINOR + **BREAKING**
 - 버전은 머지되는 PR 안에서 올림. 태그는 사용자(owner) 승인 후에만
 - 목표: P0는 0.0.1 안에 포함(버전 올림 없음), P1 = 0.0.2. **0.1.0 = P13 순번 필드 + P8 HMAC v2 (BREAKING)** [결정]. 0.1.0 전의 비호환 없는 단계는 0.0.x PATCH로 올리고, 0.1.0은 P8과 P13 전용, P3 = 0.0.x PATCH(응답 의미 변경 공지)

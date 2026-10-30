@@ -178,7 +178,7 @@ Locally without a proxy, use `http://127.0.0.1:8160`.
 
 ## 4. Environment variables
 
-All settings live in one `.env` file, which the check script also reads. The app reads the nine names in `app/settings.py`. `PUBLIC_BASE_URL` is read only by docs and the check script, never by the app.
+All settings live in one `.env` file, which the check script also reads. The app reads the eleven names in `app/settings.py`. `PUBLIC_BASE_URL` is read only by docs and the check script, never by the app.
 
 Generate the token and the HMAC key separately (run twice, use different values):
 
@@ -202,6 +202,8 @@ GROK_WEBHOOK_URL=
 GROK_WEBHOOK_KEY=
 GROK_WEBHOOK_KEY_HEADER=
 PUBLIC_BASE_URL=https://hook.example.com
+CUE_STATE_DB=
+CUE_OUTBOX_POLL_SECONDS=5
 ```
 
 | Variable | Required | Read by | Meaning | Example |
@@ -215,6 +217,8 @@ PUBLIC_BASE_URL=https://hook.example.com
 | `GROK_WEBHOOK_URL` | no | app | Address the Grok Bot routine listens on. Empty: no forwarding | empty, or `https://grok.example/hook` |
 | `GROK_WEBHOOK_KEY` | no | app | Key sent to that address. Both URL and key are needed to forward | empty, or a separate key |
 | `GROK_WEBHOOK_KEY_HEADER` | no | app | Empty: `Authorization: Bearer <GROK_WEBHOOK_KEY>`. Set: the bare key in that header | empty, or `X-Grok-Key` |
+| `CUE_STATE_DB` | no | app | SQLite path for acceptance, replay, and the outbox. Empty: process memory only. No built-in path | empty, or `/var/lib/grok-cue/state.sqlite` |
+| `CUE_OUTBOX_POLL_SECONDS` | no | app | Outbox poll interval in seconds for this process. Default 5. Values ≤ 0 stop startup. Also pumps once at startup | `5` |
 | `PUBLIC_BASE_URL` | check script | docs only | Address the check script calls. The app ignores it. The script stops if empty | `https://hook.example.com` |
 
 Empty optional values mean "off". With `GROK_WEBHOOK_URL` and `GROK_WEBHOOK_KEY` left empty as in the example, copying the file does not forward anything. No address is hard-coded.
@@ -229,7 +233,7 @@ Headers:
 
 - `Authorization: Bearer <CUE_BRIDGE_TOKEN>`
 - `X-Cue-Timestamp`: current Unix seconds, within 300 s of server time
-- `X-Cue-Signature`: HMAC-SHA256 hex (case-insensitive). No `sha256=` prefix. With no version header the input is `{timestamp}.{raw_body}` (v1). `X-Cue-Signature-Version: 2` joins `v2`, METHOD, PATH, timestamp, and the raw body with newlines. Any other version is `401`. v1 is still accepted
+- `X-Cue-Signature`: HMAC-SHA256 hex (case-insensitive). No `sha256=` prefix. With no version header the input is `{timestamp}.{raw_body}` (v1). `X-Cue-Signature-Version: 2` joins `v2`, METHOD, PATH, timestamp, and the raw body with newlines. Any other version is `401`. v1 is still accepted. A verified acceptance logs and stores only `signature_version` `1` or `2`. The signature string is not logged
 - `Content-Type: application/json`
 
 There is exactly one dot between the timestamp string and the body bytes. Re-serializing the JSON changes the bytes and breaks the signature, so keep the original bytes.
@@ -239,15 +243,16 @@ When retrying:
 - Keep the body bytes and the `idempotency_key` inside them.
 - Regenerate only `X-Cue-Timestamp` and `X-Cue-Signature`.
 - Resending the same signature returns `401`.
-- The same body with a fresh signature returns `202` with the original `handoff_id`. It is not forwarded again.
-- A different body with the same `idempotency_key` returns `409`.
+- The same body with a fresh signature returns `202` with the original `handoff_id`. It is not forwarded again. `forwarded` is the outbox state at that moment, and it is `true` only after a Grok 2xx is recorded.
+- A different body with the same `idempotency_key` returns `409 idempotency_conflict`.
+- A different body for the same `(handoff_id, attempt, report_seq)` returns `409 sequence_conflict`. An older generation is stored and not forwarded.
 
 If `reply_to` is omitted, `REPLY_TO_DEFAULT` is used and must be in `REPLY_TO_ALLOWLIST`. Field names and lengths follow [DESIGN.en.md](DESIGN.en.md). Never include a `task_id` key.
 
 ### Cue-side setup
 
 > [!NOTE]
-> **Verified on 2026-10-29:** the current Cue environment sent a real signed JSON POST and received HTTP `202` with `status`=`received`, `executed`=`false`, and `forwarded`=`true`. Downstream receipt was confirmed at 16:05 KST. This proves only a single request from the current Cue environment. It does not prove that every Cue chat task is sent automatically, and it does not prove install compatibility in other environments. `202` with `forwarded: true` means the request was received and forwarded. It does not mean the task is complete. What follows is not Cue's UI. It is the generic requirement any sender must meet.
+> **Verified on 2026-10-29:** that environment sent a real signed JSON POST and received HTTP `202` with `status`=`received`, `executed`=`false`, and `forwarded`=`true`. Downstream receipt was confirmed by Norn (user) at 16:05 KST. That record is only that one request. The later 0.1.0 dummy live check passed 6/6. One real Cue request was accepted and forwarded, and that request's signature version is unconfirmed. Today `forwarded: true` only after a Grok 2xx is recorded. What follows is not Cue's UI. It is the generic requirement any sender must meet.
 
 Cue-side flow:
 
@@ -276,7 +281,7 @@ For every request the sender must:
 
 ### Notice Grok Bot receives
 
-When both `GROK_WEBHOOK_URL` and `GROK_WEBHOOK_KEY` are set, grok-cue POSTs JSON to that address after acceptance, with a 5 s timeout. A failure does not change the `202` already returned to Cue.
+When both `GROK_WEBHOOK_URL` and `GROK_WEBHOOK_KEY` are set, grok-cue POSTs JSON to that address after the acceptance commit. Each attempt times out at 5 s. Retries are at most 7 attempts including the first, inside 60 minutes from the first attempt. A failure does not change the `202` already returned to Cue.
 
 If `GROK_WEBHOOK_KEY_HEADER` is empty the header is `Authorization: Bearer <GROK_WEBHOOK_KEY>`; otherwise the bare key arrives in the named header, without a Bearer prefix.
 
@@ -286,7 +291,7 @@ Only these 10 keys are sent ([DESIGN.en.md spec](DESIGN.en.md#spec)):
 
 `schema_version`, `title`, `created_at`, `reply_to`, `requested_by` are not included. This process never sends mail.
 
-`202` with `forwarded: true` means the request was received and forwarded. It does not mean the task is complete, and it does not mean the Grok Bot routine succeeded. `forwarded` is `false` when the URL or key is missing, or for a replay of the same body. `executed` is always `false`.
+`202` is the response after the acceptance commit. `forwarded: true` only after that row records a Grok 2xx. The first `202` has `forwarded: false`. Without a URL or key, `forward_state` is `disabled`. Resending the same body does not forward again. `executed` is always `false`.
 
 ## 6. Verifying
 
@@ -308,7 +313,7 @@ curl -sS -D - https://hook.example.com/healthz
 Shipped in the repository; standard library only. It never loads `.env` into a shell. A tiny `KEY=VALUE` parser inside the script reads it, so characters such as `&`, `$`, `;` are never shell-interpreted and secrets do not linger in the shell environment.
 
 - **Dry run by default.** It builds a signed test request and prints only a summary (target URL, test `handoff_id`, body size, whether forwarding is configured) and **sends nothing**. Token and signature are shown as `<hidden>`.
-- **Only with `--send`** does it call the server: health `200`, unsigned POST `401`, first signed POST `202`, replay of the same body `202` (same `handoff_id`, `forwarded=false`), different body with the same key `409`.
+- **Only with `--send`** does it call the server: health `200`, unsigned POST `401`, first signed POST `202`, replay of the same body `202` (same `handoff_id`, no second forward), different body with the same key `409`. The script expects that replay's `forwarded` to be `false`. The server's `forwarded` is the outbox state at that moment, and it is `true` only after a Grok 2xx is recorded.
 - Test-only values: `title` is `[TEST] connectivity check`, `summary` is `connectivity test — not a real task`, and a fresh `handoff_id` and `idempotency_key` are generated on every run. Status values and fields follow the spec unchanged.
 
 Run from the install folder. For local-only checks set `PUBLIC_BASE_URL=http://127.0.0.1:8160` in `.env`.
@@ -331,8 +336,9 @@ Use `--env PATH` if `.env` lives elsewhere. Resending the exact same timestamp a
 | `400` `task_id_not_allowed` | A `task_id` key somewhere in the body | Remove it; use `handoff_id` only |
 | `409` `idempotency_conflict` | Different bytes with the same `idempotency_key` | Resend the original bytes. Reordered JSON keys count as a different body. The first acceptance stays |
 | `409` `sequence_conflict` | Different bytes for the same `(handoff_id, attempt, report_seq)` | Keep the first body for that generation. An older generation is stored and not forwarded |
-| `202` but `forwarded` is `false` | No forward was scheduled for this request | Both `GROK_WEBHOOK_URL` and `GROK_WEBHOOK_KEY` set? Replays are also `false` |
-| `202` but nothing at Grok Bot | Scheduled is not delivered; failures do not change Cue's `202` | URL is the routine's receiving address; key header name matches; 5 s timeout |
+| `503` `storage_unavailable` | `POST /v1/cue/tasks` could not use the state database. `GET /healthz` can still be `ok` | Whether `CUE_STATE_DB`'s directory is writable. `ProtectSystem=strict` needs `ReadWritePaths` |
+| `202` but `forwarded` is `false` | A Grok 2xx is not recorded yet, or forwarding is off | With forwarding on, the first `202` having `forward_state` `queued` is expected. If either URL or key is empty, `disabled` is expected. Only a replay after `delivered` has `forwarded: true` |
+| `202` but nothing at Grok Bot | The first `202` does not wait for 2xx. A failure does not change that `202` | Check the URL and key header name. Each attempt is 5 s, at most 7 attempts, inside 60 minutes |
 | `dig` returns nothing | DNS does not point here yet | Check A/AAAA name and value; wait, then rerun `dig` and `nslookup` |
 | Certificate error in browser or curl | HTTPS certificate not obtained | DNS points here, 80/443 open, Caddyfile name is `hook.example.com`, Caddy running |
 | Local `8160` works, domain does not | Proxy layer | `uvicorn` on `127.0.0.1:8160`, Caddy `reverse_proxy` to that address. Do not expose 8160 |

@@ -19,11 +19,11 @@ This document is the single spec for request fields. The code (`app/models.py`) 
 
 It accepts correctly signed JSON. The response is `202` with `status: "received"`. `executed` is always `false`. This response is not approval to execute, merge, deploy, or pay.
 
-When both `GROK_WEBHOOK_URL` and `GROK_WEBHOOK_KEY` are set, only the 10 fields listed in the spec are forwarded to Grok Bot after acceptance (see [Spec](#spec), item 3). No mail is sent. The timeout is 5 s. A failed forward does not change the `202` already returned. A report older than the stored `(attempt, report_seq)` is stored and not forwarded.
+When both `GROK_WEBHOOK_URL` and `GROK_WEBHOOK_KEY` are set, only the 10 fields listed in the spec are forwarded to Grok Bot after the acceptance commit (see [Spec](#spec), item 3). No mail is sent. Each attempt times out at 5 s. Retries are at most 7 attempts including the first, inside 60 minutes from the first attempt. A failed forward does not change the `202` already returned. A report older than the stored `(attempt, report_seq)` is stored and not forwarded.
 
 Without `GROK_WEBHOOK_KEY_HEADER` it sends `Authorization: Bearer <GROK_WEBHOOK_KEY>`; with a header name, the bare key goes in that header.
 
-`forwarded: true` means a forward was scheduled for this request, not that Grok Bot succeeded. Without settings, or for a replay of the same body, `forwarded` is `false`.
+`forwarded: true` means that outbox row recorded a Grok 2xx. The first `202` goes out before that, so `forwarded` is `false`. Without settings, `forward_state` is `disabled`. Resending the same body does not forward again; `forwarded` is the outbox state at that moment.
 
 Unknown keys are rejected. There are no fields for `diff`, `patch`, `source`, file contents, or secrets. The body limit is 64 KiB (65536 bytes). It is checked before authentication; larger bodies get `400 invalid_request` with `fields` = `body`.
 
@@ -109,9 +109,9 @@ Reply addresses are set only via environment variables. No address is hard-coded
 ## Accepted response
 
 ```json
-{"handoff_id":"<uuid>","status":"received","executed":false,"forwarded":false}
+{"handoff_id":"<uuid>","status":"received","executed":false,"forwarded":false,"forward_state":"queued"}
 ```
 
-For the same key and the same body, `handoff_id`, `status`, and `executed` match the first acceptance and `forwarded` is `false`. Logs never contain tokens, HMAC keys, the Grok key, signatures, bodies, or summaries.
+For the same key and the same body, `handoff_id`, `status`, and `executed` match the first acceptance. `forwarded` and `forward_state` are the outbox state at that moment. Logs never contain tokens, HMAC keys, the Grok key, signatures, bodies, or summaries. A verified acceptance logs and stores only `signature_version=1` or `2`.
 
 Order is lexicographic on `(attempt, report_seq)`. A report older than the stored generation is recorded only: the current generation stays, and that report is not forwarded. A different body for the same `(handoff_id, attempt, report_seq)` returns `409` `{"error":"sequence_conflict"}` and leaves the first acceptance in place. A different body for the same `idempotency_key` is still `409` `{"error":"idempotency_conflict"}`.
