@@ -2,7 +2,7 @@
 
 # Changelog
 
-The current version is `0.0.2`. The value lives only in [`VERSION`](VERSION) at the repository root. The app does not read that file, and no response, including `/healthz`, includes the version.
+The current version is `0.0.3`. The value lives only in [`VERSION`](VERSION) at the repository root. The app does not read that file, and no response, including `/healthz`, includes the version.
 
 ## Version rules
 
@@ -25,6 +25,14 @@ Pre-1.0, and bumped in a SemVer-like way.
 - The 2026-10-29 E2E is one successful request record. Grok-side receipt was confirmed separately by Norn (user) at 16:05 KST.
 - In docs and READMEs the owner is 노른(사용자) in Korean and Norn (user) in English. There was no existing personal-name wording to replace.
 - Versioning was added only in `VERSION`, this changelog, and one README line. Application code was not changed, and no tag was created.
+
+## 0.0.3 — 2026-10-30
+
+PATCH. `0.1.0` is reserved for P8 HMAC v2 and the P13 sequence fields. The request fields, the signature, and the meaning of `202` are unchanged. There are no retries and no outbox.
+
+### Features
+
+- Acceptance records and replay prevention are stored in SQLite. The path is the `CUE_STATE_DB` environment variable. When it is empty, records stay in process memory. There is no built-in path. After a restart the same body returns the stored `202`, a different body is `409`, and the same signature is `401`. If the database cannot be written, the response is `503 storage_unavailable` and no `202` is returned. The raw signature is not stored; only its SHA-256 is.
 
 ## 0.0.2 — 2026-10-30
 
