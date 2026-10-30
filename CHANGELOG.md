@@ -18,6 +18,7 @@
 
 ## Unreleased
 
+- 비정상 상황 처리 분석·설계안을 `docs/ABNORMAL_HANDLING.md`로 추가했습니다. 제안으로 적힌 항목은 구현되지 않았습니다.
 - 에이전트 설치 문서(`docs/AI_SETUP.md`, `docs/AI_SETUP.en.md`)에서 HTTP `202`와 `forwarded: true`의 뜻을 고쳤습니다. `202`는 Bridge가 요청을 받아 검증하고 메모리에 기록했다는 뜻입니다. Grok이 받았다는 뜻도, 어떤 작업이 실행되었다는 뜻도 아닙니다. `forwarded: true`는 Grok 전달을 `add_task` 백그라운드 작업으로 예약했다는 뜻입니다. Grok의 2xx 응답 확인이 아닙니다. 재시도, outbox, 영속 저장은 구현되어 있지 않다고 적었습니다.
 - 2026-10-29 E2E는 성공한 요청 기록 한 건입니다. Grok 쪽 수신은 노른(사용자)가 16:05 KST에 따로 확인했습니다.
 - 문서와 README에서 소유자는 한국어로 노른(사용자), 영어로 Norn (user)입니다. 실명으로 바꿀 기존 표기는 없었습니다.
