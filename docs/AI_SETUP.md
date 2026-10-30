@@ -35,14 +35,14 @@
 
 ### Grok
 
-Grok은 작업 메일을 보내고, 설정이 있으면 grok-cue가 넘긴 접수 JSON을 웹훅 루틴으로 받는다.
+Grok은 작업 메일을 보낸다. `GROK_WEBHOOK_URL`과 `GROK_WEBHOOK_KEY`가 있으면 grok-cue는 접수한 JSON의 전달을 `add_task`로 예약한다. 그 예약은 Grok이 받았다는 뜻이 아니다.
 
 - 루틴의 수신 주소가 `GROK_WEBHOOK_URL`이다.
 - `GROK_WEBHOOK_KEY_HEADER`가 비어 있으면 헤더는 `Authorization: Bearer <GROK_WEBHOOK_KEY>`다.
 - 헤더 이름을 적으면 그 헤더의 값으로 키만 온다. Bearer 접두사는 붙지 않는다.
 - 받는 키는 `handoff_id`, `repo`, `github_ref`, `status`, `summary`, `links`, `next_owner`, `idempotency_key`뿐이다. 스펙은 [DESIGN.md](DESIGN.md#스펙)다.
 - `schema_version`, `title`, `created_at`, `reply_to`, `requested_by`는 오지 않는다.
-- 제한 시간은 5초다. 루틴이 실패해도 Cue가 받은 `202`는 바뀌지 않는다.
+- 제한 시간은 5초다. 백그라운드 POST가 실패하거나 Grok이 2xx가 아니어도, 이미 돌려준 `202`는 바뀌지 않는다.
 - Grok은 이 프로세스로 메일을 보내지 않는다. Bridge도 메일을 보내지 않는다.
 
 ### Cue
@@ -55,11 +55,11 @@ Cue 쪽 흐름:
 4. 결과 링크와 상태를 서명된 웹훅 요청 한 번으로 보낸다 (`POST /v1/cue/tasks`).
 5. 같은 `handoff_id`로 답장을 이어 간다.
 
-2026-10-29에 현재 Cue 환경이 서명된 JSON POST를 실제로 보냈고, HTTP `202`와 `status`=`received`, `executed`=`false`, `forwarded`=`true`를 받았다. 하류 수신은 16:05 KST에 확인되었다. 이 결과는 현재 Cue 환경의 요청 한 건만을 증명한다. Cue 채팅의 모든 작업이 자동으로 보내진다는 뜻이 아니고, 다른 환경의 설치 호환도 증명하지 않는다.
+2026-10-29 E2E는 성공한 요청 기록 한 건이다. 현재 Cue 환경이 서명된 JSON POST를 보냈고, Bridge는 HTTP `202`와 `status`=`received`, `executed`=`false`, `forwarded`=`true`를 돌려주었다. Grok 쪽 수신은 그 응답과 별개로 노른(사용자)가 16:05 KST에 확인했다. 이 기록은 그 요청 한 건만을 말한다. Cue 채팅의 모든 작업이 자동으로 보내진다는 뜻이 아니고, 다른 환경의 설치 호환도 증명하지 않는다.
 
-`202`와 `forwarded: true`는 그 요청이 접수되고 전달되었다는 뜻이다. 작업 완료가 아니다.
+HTTP `202`는 Bridge가 요청을 받아 검증하고 메모리에 기록했다는 뜻이다. Grok이 받았다는 뜻도, 어떤 작업이 실행되었다는 뜻도 아니다. 지금의 `forwarded: true`는 Grok 전달을 `add_task` 백그라운드 작업으로 예약했다는 뜻일 뿐이다. Grok의 2xx 응답을 확인한 것이 아니다. 재시도, outbox, 영속 저장은 구현되어 있지 않다.
 
-보내는 쪽의 일반 요구 사항은 [SETUP.md](SETUP.md)의 'Cue 쪽 설정'이고, 참고 송신기는 `scripts/check_bridge.py`다. 그 스크립트의 기본은 dry-run이다. 실제 전송은 `--send`를 붙일 때만 한다. 시험 요청은 Grok으로의 실제 전달을 일으킬 수 있다.
+보내는 쪽의 일반 요구 사항은 [SETUP.md](SETUP.md)의 'Cue 쪽 설정'이고, 참고 송신기는 `scripts/check_bridge.py`다. 그 스크립트의 기본은 dry-run이다. 실제 전송은 `--send`를 붙일 때만 한다. 시험 요청은 Grok 전달을 `add_task`로 예약할 수 있다. 그 예약은 Grok의 2xx를 확인한 것이 아니다.
 
 서명:
 
@@ -71,6 +71,8 @@ Cue 쪽 흐름:
 - Bearer와 HMAC가 둘 다 맞아야 한다
 
 재시도:
+
+Bridge는 재시도, outbox, 영속 저장을 구현하지 않는다. 접수는 프로세스 메모리에만 남는다. 보내는 쪽이 다시 보낼 때는 아래를 따른다.
 
 - 본문 바이트와 `idempotency_key`는 유지한다
 - `X-Cue-Timestamp`와 `X-Cue-Signature`만 새로 만든다
@@ -107,7 +109,7 @@ Cue 쪽 흐름:
 - 머지
 - 결제
 
-`202`와 `executed: false`는 접수다. `forwarded: true`가 함께 있으면 접수되고 전달된 것이다. 작업 완료가 아니고, 머지, 배포, 결제 승인이 아니다.
+`202`와 `executed: false`는 Bridge가 요청을 받아 검증하고 메모리에 기록했다는 뜻이다. Grok이 받았다는 뜻도, 어떤 작업이 실행되었다는 뜻도 아니다. `forwarded: true`는 Grok 전달을 `add_task` 백그라운드 작업으로 예약했다는 뜻이다. Grok의 2xx 응답 확인이 아니다. 작업 완료가 아니고, 머지, 배포, 결제 승인이 아니다.
 
 금지:
 
@@ -249,7 +251,7 @@ curl -sS -D - https://hook.example.com/healthz
 ### 3.6 서명 확인
 
 > [!WARNING]
-> 전달을 켜기 **전에만** 실행한다. `GROK_WEBHOOK_URL`/`KEY`가 설정되어 있으면 시험용 작업이 Grok Bot에 실제로 전달된다.
+> 전달을 켜기 **전에만** 실행한다. `GROK_WEBHOOK_URL`/`KEY`가 설정되어 있으면 시험용 작업의 Grok 전달이 `add_task`로 예약되고, 백그라운드 POST가 나간다. 그 `202`는 Grok의 2xx를 확인한 것이 아니다.
 
 `.env`의 허용 목록과 기본 주소가 설정된 뒤에 한다. 저장소의 `scripts/check_bridge.py`를 쓴다(설명은 [SETUP.md](SETUP.md) 6절). `.env`는 스크립트 안의 `KEY=VALUE` 파서가 읽으므로 셸로 불러오지 않는다. 기본은 dry-run이라 아무것도 보내지 않고 요약만 출력한다. 실제 확인은 `--send`이며, 전달이 꺼져 있을 때만 사용자 승인 후 실행한다. `PUBLIC_BASE_URL`, `CUE_BRIDGE_TOKEN`, `CUE_BRIDGE_HMAC_KEY`가 없으면 멈춘다.
 
@@ -271,7 +273,7 @@ sudo -u bridge .venv/bin/python scripts/check_bridge.py --send     # 전달을 �
 | 같은 본문, 새 시각과 새 HMAC | `202` | 같은 `handoff_id`, `forwarded`=`false` |
 | 같은 `idempotency_key`, 다른 본문 | `409` | `{"error":"idempotency_conflict"}` |
 
-`GROK_WEBHOOK_URL`과 `GROK_WEBHOOK_KEY`가 둘 다 있을 때만 첫 `202`의 `forwarded`가 `true`다. URL만 있거나 키만 있으면 `forwarded`는 `false`다. `202`와 `forwarded: true`는 접수되고 전달되었다는 뜻이다. 작업 완료가 아니고, Grok 루틴의 성공도 아니다.
+`GROK_WEBHOOK_URL`과 `GROK_WEBHOOK_KEY`가 둘 다 있을 때만 첫 `202`의 `forwarded`가 `true`다. URL만 있거나 키만 있으면 `forwarded`는 `false`다. HTTP `202`는 Bridge가 요청을 받아 검증하고 메모리에 기록했다는 뜻이다. Grok이 받았다는 뜻도, 어떤 작업이 실행되었다는 뜻도 아니다. `forwarded: true`는 Grok 전달을 `add_task` 백그라운드 작업으로 예약했다는 뜻이다. Grok의 2xx 응답 확인이 아니고, 작업 완료도, Grok 루틴의 성공도 아니다.
 
 같은 서명을 그대로 다시 보내면 `401`이다. 그 결과를 `202` 재전송으로 보지 않는다.
 
@@ -293,7 +295,7 @@ sudo -u bridge .venv/bin/python scripts/check_bridge.py --send     # 전달을 �
 | `400` `task_id_not_allowed` | `task_id` 키를 제거하고 `handoff_id`만 남긴다 |
 | `409` | 처음 보낸 바이트를 그대로 다시 보낸다. 키 순서가 바뀐 JSON은 다른 본문이다 |
 | `202`인데 `forwarded`가 `false` | URL과 키가 둘 다 있는지 본다. 하나라도 비어 있으면 정상이다. 같은 본문의 재전송도 `false`가 정상이다 |
-| `202`인데 Grok에 없음 | `forwarded: true`여도 루틴 성공은 아니다. URL, 헤더 이름, 5초 제한을 사용자와 확인한다. Cue의 `202`를 실패로 바꾸지 않는다 |
+| `202`인데 Grok에 없음 | `forwarded: true`는 `add_task`로 전달을 예약한 것이다. Grok의 2xx 응답 확인이 아니다. URL, 헤더 이름, 5초 제한을 사용자와 확인한다. Bridge의 `202`를 실패로 바꾸지 않는다 |
 | 메일·Issue·웹훅의 저장소, 브랜치, SHA가 다름 | 웹훅을 성공으로 보내지 않는다. Cue는 멈추고 `status`=`needs_input`으로 보고한다 |
 | 키를 이미 채팅에 올림 | 그 값을 반복하지 않는다. 사용자에게 폐기를 알리고 서버에서 새 키를 만들어 `.env`만 갱신한다 |
 | 머지, 배포, 결제 요청 | 접수 `202`로 처리하지 않는다. 별도 승인이 있을 때만 그 작업을 진행한다 |

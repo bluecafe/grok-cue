@@ -2,6 +2,8 @@
 
 # grok-cue
 
+Current version: `0.0.1` ([VERSION](VERSION), [changelog](CHANGELOG.en.md))
+
 grok-cue is a small, signed "reception desk" between two AI assistant services:
 [Cue](https://cue.im/), the personal-agent app by Manus, and
 [Grok Bot](https://docs.x.ai/grok-bot/overview), xAI's agents that work on their own cloud computers.

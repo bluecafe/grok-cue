@@ -35,14 +35,14 @@ Never accept key values (`CUE_BRIDGE_TOKEN`, `CUE_BRIDGE_HMAC_KEY`, secondaries,
 
 ### Grok Bot
 
-Grok Bot sends the task email and, when configured, receives the accepted JSON forwarded by grok-cue through a webhook routine.
+Grok Bot sends the task email. When `GROK_WEBHOOK_URL` and `GROK_WEBHOOK_KEY` are set, grok-cue schedules delivery of the accepted JSON with `add_task`. That schedule does not mean Grok received it.
 
 - The routine's receiving address is `GROK_WEBHOOK_URL`.
 - If `GROK_WEBHOOK_KEY_HEADER` is empty, the header is `Authorization: Bearer <GROK_WEBHOOK_KEY>`.
 - If a header name is set, the bare key arrives in that header, without a Bearer prefix.
 - Received keys are only `handoff_id`, `repo`, `github_ref`, `status`, `summary`, `links`, `next_owner`, `idempotency_key`. Spec: [DESIGN.en.md](DESIGN.en.md#spec).
 - `schema_version`, `title`, `created_at`, `reply_to`, `requested_by` are not sent.
-- Timeout is 5 s. A routine failure does not change the `202` Cue received.
+- Timeout is 5 s. If the background POST fails, or Grok does not return 2xx, the `202` already returned does not change.
 - Grok Bot does not send mail through this process, and grok-cue never sends mail.
 
 ### Cue
@@ -55,11 +55,11 @@ Cue-side flow:
 4. Send the result link and status in one signed webhook request (`POST /v1/cue/tasks`).
 5. Continue replies on the same `handoff_id`.
 
-On 2026-10-29 the current Cue environment sent a real signed JSON POST and received HTTP `202` with `status`=`received`, `executed`=`false`, and `forwarded`=`true`. Downstream receipt was confirmed at 16:05 KST. This proves only a single request from the current Cue environment. It does not prove that every Cue chat task is sent automatically, and it does not prove install compatibility in other environments.
+The 2026-10-29 E2E is a single successful request record. The current Cue environment sent a signed JSON POST, and the bridge returned HTTP `202` with `status`=`received`, `executed`=`false`, and `forwarded`=`true`. Grok-side receipt was confirmed separately by Norn (user) at 16:05 KST. This record covers only that one request. It does not prove that every Cue chat task is sent automatically, and it does not prove install compatibility in other environments.
 
-`202` with `forwarded: true` means the request was received and forwarded. It does not mean the task is complete.
+HTTP `202` means the bridge received and validated the request and recorded it in memory. It does not mean Grok received it, and it does not mean any task ran. Currently, `forwarded: true` only means Grok delivery was scheduled as an `add_task` background task. It is not confirmation of a Grok 2xx response. Retries, an outbox, and persistent storage are not implemented.
 
-The generic sender requirement is in [SETUP.en.md](SETUP.en.md), 'Cue-side setup'. The reference sender is `scripts/check_bridge.py`. Its default is a dry run. A real send requires explicit `--send`. A test request can cause a real Grok delivery.
+The generic sender requirement is in [SETUP.en.md](SETUP.en.md), 'Cue-side setup'. The reference sender is `scripts/check_bridge.py`. Its default is a dry run. A real send requires explicit `--send`. A test request can schedule a real Grok delivery with `add_task`. That schedule is not confirmation of a Grok 2xx response.
 
 Signing:
 
@@ -71,6 +71,8 @@ Signing:
 - Both Bearer and HMAC must match
 
 Retries:
+
+The bridge does not implement retries, an outbox, or persistent storage. An acceptance is kept only in process memory. When the sender sends again, follow the rules below.
 
 - Keep the body bytes and `idempotency_key`
 - Regenerate only `X-Cue-Timestamp` and `X-Cue-Signature`
@@ -107,7 +109,7 @@ Get the user's approval before any of the following. Do not proceed without an e
 - Merging
 - Paying
 
-`202` with `executed: false` is acceptance. Together with `forwarded: true` it means received and forwarded. It is not task completion, and it is not approval to merge, deploy, or pay.
+`202` with `executed: false` means the bridge received and validated the request and recorded it in memory. It does not mean Grok received it, and it does not mean any task ran. `forwarded: true` only means Grok delivery was scheduled as an `add_task` background task. It is not confirmation of a Grok 2xx response. It is not task completion, and it is not approval to merge, deploy, or pay.
 
 Prohibited:
 
@@ -249,7 +251,7 @@ curl -sS -D - https://hook.example.com/healthz
 ### 3.6 Signature check
 
 > [!WARNING]
-> Run this only **before** forwarding is enabled. With `GROK_WEBHOOK_URL`/`KEY` set, the test handoff is really forwarded to Grok Bot.
+> Run this only **before** forwarding is enabled. With `GROK_WEBHOOK_URL`/`KEY` set, Grok delivery of the test handoff is scheduled with `add_task` and a background POST is sent. That `202` is not confirmation of a Grok 2xx response.
 
 Do this after the allowlist and default address are set in `.env`. Use the repository's `scripts/check_bridge.py` (described in [SETUP.en.md](SETUP.en.md) section 6). A `KEY=VALUE` parser inside the script reads `.env`, so never load it into a shell. The default is a dry run that sends nothing and prints a summary. The real check is `--send`; run it only after user approval and only while forwarding is disabled. It stops if `PUBLIC_BASE_URL`, `CUE_BRIDGE_TOKEN`, or `CUE_BRIDGE_HMAC_KEY` is missing.
 
@@ -271,7 +273,7 @@ Success criteria:
 | Same body, new timestamp and HMAC | `202` | Same `handoff_id`, `forwarded`=`false` |
 | Same `idempotency_key`, different body | `409` | `{"error":"idempotency_conflict"}` |
 
-The first `202` has `forwarded: true` only when both `GROK_WEBHOOK_URL` and `GROK_WEBHOOK_KEY` are set. With only one, `forwarded` is `false`. `202` with `forwarded: true` means the request was received and forwarded. It does not mean the task is complete, and it does not mean the Grok Bot routine succeeded.
+The first `202` has `forwarded: true` only when both `GROK_WEBHOOK_URL` and `GROK_WEBHOOK_KEY` are set. With only one, `forwarded` is `false`. HTTP `202` means the bridge received and validated the request and recorded it in memory. It does not mean Grok received it, and it does not mean any task ran. `forwarded: true` only means Grok delivery was scheduled as an `add_task` background task. It is not confirmation of a Grok 2xx response, task completion, or success of the Grok Bot routine.
 
 Resending the exact same signature returns `401`; do not treat that as a `202` replay.
 
@@ -293,7 +295,7 @@ The script generates a fresh test `handoff_id` and `idempotency_key` on every ru
 | `400` `task_id_not_allowed` | Remove the `task_id` key; keep only `handoff_id` |
 | `409` | Resend the original bytes. Reordered JSON keys are a different body |
 | `202` but `forwarded` is `false` | Check both URL and key are set. If either is empty this is expected. Replays are also `false` |
-| `202` but nothing at Grok Bot | `forwarded: true` does not mean the routine succeeded. Check URL, header name, and the 5 s limit with the user. Do not turn Cue's `202` into a failure |
+| `202` but nothing at Grok Bot | `forwarded: true` only means delivery was scheduled with `add_task`. It is not confirmation of a Grok 2xx response. Check URL, header name, and the 5 s limit with the user. Do not turn the bridge's `202` into a failure |
 | Repository, branch, or SHA differ between email, issue, and webhook | Do not send a success webhook. Cue stops and reports `status: "needs_input"` |
 | A key was already posted in chat | Do not repeat it. Tell the user to revoke it, generate a new key on the server, and update only `.env` |
 | A request to merge, deploy, or pay | Do not treat it as handled by the `202`. Proceed only with separate approval |

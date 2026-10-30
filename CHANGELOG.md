@@ -1,0 +1,43 @@
+한국어 | [English](CHANGELOG.en.md)
+
+# 변경 기록
+
+현재 버전은 `0.0.1`입니다. 값은 저장소 루트의 [`VERSION`](VERSION)에만 둡니다. 앱은 이 파일을 읽지 않고, `/healthz`를 포함한 응답에도 버전을 넣지 않습니다.
+
+## 버전 규칙
+
+1.0 전이고, SemVer와 비슷하게 올립니다.
+
+- 문서 수정과 버그 수정은 PATCH입니다. 예: `0.0.1` → `0.0.2`.
+- 새 기능은 MINOR입니다. 예: `0.0.1` → `0.1.0`.
+- 호환이 깨지는 변경(서명 방식이나 필드 변경)도 MINOR를 올리고, 그 항목을 BREAKING으로 표시합니다.
+- 버전을 올리는 일은 머지되는 PR 안에서 합니다. 그 PR이 `VERSION`과 이 기록을 함께 고칩니다.
+- git 태그 `v0.0.1`은 머지된 뒤에만, 그리고 사용자가 승인한 뒤에만 만듭니다. 다른 `vX.Y.Z` 태그도 같습니다.
+
+`0.0.1`은 `2483c3b`의 기능과 문서입니다. 그 뒤의 문서 교정은 번호를 올리기 전까지 Unreleased에 둡니다.
+
+## Unreleased
+
+- 에이전트 설치 문서(`docs/AI_SETUP.md`, `docs/AI_SETUP.en.md`)에서 HTTP `202`와 `forwarded: true`의 뜻을 고쳤습니다. `202`는 Bridge가 요청을 받아 검증하고 메모리에 기록했다는 뜻입니다. Grok이 받았다는 뜻도, 어떤 작업이 실행되었다는 뜻도 아닙니다. `forwarded: true`는 Grok 전달을 `add_task` 백그라운드 작업으로 예약했다는 뜻입니다. Grok의 2xx 응답 확인이 아닙니다. 재시도, outbox, 영속 저장은 구현되어 있지 않다고 적었습니다.
+- 2026-10-29 E2E는 성공한 요청 기록 한 건입니다. Grok 쪽 수신은 노른(사용자)가 16:05 KST에 따로 확인했습니다.
+- 문서와 README에서 소유자는 한국어로 노른(사용자), 영어로 Norn (user)입니다. 실명으로 바꿀 기존 표기는 없었습니다.
+- 버전 관리를 `VERSION`, 이 기록, README의 한 줄에만 추가했습니다. 앱 코드는 바꾸지 않았고, 태그는 만들지 않았습니다.
+
+## 0.0.1
+
+### 기능
+
+- `POST /v1/cue/tasks`로 서명된 작업 인계를 받습니다. Bearer와 HMAC-SHA256이 둘 다 맞아야 하고, 허용 시각 차이는 ±300초입니다. 서명은 한 번만 쓸 수 있습니다.
+- 키를 바꿀 때 기본 값과 보조 값을 함께 받습니다.
+- `idempotency_key`로 같은 본문은 다시 `202`를, 다른 본문은 `409`를 돌려줍니다. 그 기록은 프로세스 메모리에만 있습니다. 재시도, outbox, 영속 저장은 없습니다.
+- 본문은 64 KiB 이하이고 `application/json`입니다. `task_id`는 거부합니다. `reply_to`는 허용 목록만 받습니다.
+- `GROK_WEBHOOK_URL`과 `GROK_WEBHOOK_KEY`가 둘 다 있을 때, 같은 멱등 키의 첫 접수에서만 8개 필드를 `add_task`로 Grok에 넘기도록 예약합니다. 제한 시간은 5초입니다. `executed`는 항상 `false`입니다.
+- 메일을 보내지 않습니다. 작업 실행, 머지, 배포, 결제도 하지 않습니다. 비밀과 요청 본문은 로그에 남기지 않습니다. `GET /healthz`는 프로세스가 응답하는지만 봅니다.
+
+### 문서
+
+- 사람용 설치: `docs/SETUP.md`, `docs/SETUP.en.md`
+- 에이전트용 설치: `docs/AI_SETUP.md`, `docs/AI_SETUP.en.md`
+- 필드와 전달 스펙: `docs/DESIGN.md`, `docs/DESIGN.en.md`
+- 소개와 응답 표: `README.md`, `README.en.md`
+- 참고 송신기: `scripts/check_bridge.py`
