@@ -24,11 +24,11 @@ grok-cue는 두 AI 비서 서비스 사이에 놓이는 작은 "접수 창구" �
 - `idempotency_key`로 중복을 막습니다. 같은 바이트면 처음의 `202`를 그대로 돌려주고, 다른 바이트면 `409`입니다.
 - 본문을 엄격하게 검사합니다(64 KiB 제한, `application/json`, `github_ref` 형식, 어디에도 `task_id` 금지).
 - `reply_to`는 환경 변수로 정한 메일 주소 허용 목록 안에서만 받습니다.
-- 선택적으로, 정해진 10개 필드(`handoff_id`, `attempt`, `report_seq`, `repo`, `github_ref`, `status`, `summary`, `links`, `next_owner`, `idempotency_key`)([스펙](docs/DESIGN.md#스펙))만 `GROK_WEBHOOK_URL`로 백그라운드 전달합니다. 제한 시간은 5초입니다.
-- 토큰, 키, 서명 같은 비밀과 요청 본문은 로그에 남기지 않습니다.
+- 선택적으로, 정해진 10개 필드(`handoff_id`, `attempt`, `report_seq`, `repo`, `github_ref`, `status`, `summary`, `links`, `next_owner`, `idempotency_key`)([스펙](docs/DESIGN.md#스펙))만 `GROK_WEBHOOK_URL`로 전달합니다. 한 시도의 HTTP 제한 시간은 5초입니다. 재시도는 첫 시도를 포함해 최대 7회, 첫 시도 시작부터 60분 안입니다.
+- 토큰, 키, 서명 같은 비밀과 요청 본문은 로그에 남기지 않습니다. 검증을 통과해 접수되면 로그에는 `signature_version=1` 또는 `2`만 남고, 같은 정수를 접수 행에 저장합니다. 응답 본문에는 버전을 넣지 않습니다.
 - `GET /healthz`로 서버가 켜져 있는지 확인할 수 있습니다.
 
-중복 방지와 서명 재사용 기록은 프로세스 메모리에만 있어서, 다시 시작하면 사라집니다.
+`CUE_STATE_DB`가 있으면 접수, 서명 재생 방지, 아웃박스는 그 SQLite 파일에 남습니다. 비어 있으면 프로세스 메모리뿐이라 재시작하면 사라집니다.
 
 ## 동작 방식
 
@@ -38,7 +38,7 @@ grok-cue는 두 AI 비서 서비스 사이에 놓이는 작은 "접수 창구" �
                             └─ 토큰·HMAC·시각 확인 → 본문 검사 → 202 / 4xx
 ```
 
-전달은 `GROK_WEBHOOK_URL`과 `GROK_WEBHOOK_KEY`가 둘 다 설정되어 있을 때만, 그리고 같은 멱등 키의 첫 접수에서만 일어납니다. 전달이 실패해도 이미 돌려준 `202`는 바뀌지 않습니다.
+전달은 `GROK_WEBHOOK_URL`과 `GROK_WEBHOOK_KEY`가 둘 다 설정되어 있을 때만, 그리고 같은 멱등 키의 첫 접수에서만 일어납니다. `202`는 그 접수를 커밋한 뒤에 나갑니다. 첫 `202`의 `forwarded`는 `false`입니다. `forwarded: true`는 그 행이 Grok 2xx를 기록한 뒤에만입니다. 전달이 실패해도 이미 돌려준 `202`는 바뀌지 않고, 워커가 한도 안에서 다시 시도합니다.
 
 ## 설치
 
@@ -100,6 +100,8 @@ Cue가 Bearer와 HMAC 서명 헤더를 붙인 POST를 직접 보낼 수 있는�
 | `GROK_WEBHOOK_URL` | 아니오 | 전달할 주소. 비우면 전달하지 않음 |
 | `GROK_WEBHOOK_KEY` | 아니오 | 전달 주소에 보내는 키 |
 | `GROK_WEBHOOK_KEY_HEADER` | 아니오 | 비우면 `Authorization: Bearer <key>`. 헤더 이름을 적으면 그 헤더에 키 값만 보냄 |
+| `CUE_STATE_DB` | 아니오 | 접수·서명 재생·아웃박스 SQLite 경로. 비우면 프로세스 메모리만 씀. 기본 경로는 없음 |
+| `CUE_OUTBOX_POLL_SECONDS` | 아니오 | 이 프로세스의 아웃박스 주기(초). 기본 5. 0 이하는 거절. 시작 때도 한 번 pump |
 
 `PUBLIC_BASE_URL`(예: `https://hook.example.com`)은 문서와 확인 스크립트만 읽고, 앱은 무시합니다.
 
@@ -115,6 +117,7 @@ Cue가 Bearer와 HMAC 서명 헤더를 붙인 POST를 직접 보낼 수 있는�
 - 버전 헤더가 없으면 v1입니다. 입력은 `{timestamp}.{raw_body}`입니다.
 - `X-Cue-Signature-Version: 2`이면 v2입니다. 입력은 `v2`, METHOD, PATH, timestamp, raw_body를 줄바꿈으로 이은 값입니다. 예: METHOD `POST`, PATH `/v1/cue/tasks`.
 - 그 밖의 버전 값은 `401`입니다. v1은 아직 거절하지 않습니다. v1 거절은 이후 버전의 제안이며 아직 구현하지 않습니다.
+- 검증을 통과해 접수되면 로그와 접수 행에 `signature_version` `1` 또는 `2`를 남깁니다. 서명 문자열은 로그에 넣지 않습니다.
 
 다시 보낼 때는 본문 바이트를 그대로 두고 시각과 서명만 새로 계산합니다.
 
@@ -134,7 +137,7 @@ curl -sS -D - http://127.0.0.1:8160/v1/cue/tasks \
 
 ### 멱등(중복 방지)
 
-같은 `idempotency_key`와 같은 바이트 → 처음의 `202`를 `forwarded: false`로 다시 돌려줍니다. 알림과 전달은 다시 하지 않습니다.
+같은 `idempotency_key`와 같은 바이트 → `202`. `handoff_id`는 처음과 같고, 알림과 전달은 다시 하지 않습니다. `forwarded`와 `forward_state`는 그 시점의 아웃박스 상태입니다.
 같은 키와 다른 바이트(JSON 키 순서만 바뀐 경우 포함) → `409 idempotency_conflict`. `reply_to` 때문에 거절된 요청은 키를 차지하지 않습니다.
 같은 `(handoff_id, attempt, report_seq)`와 다른 바이트 → `409 sequence_conflict`. 이전 세대는 저장만 하고 현재 세대와 전달은 바꾸지 않습니다.
 
@@ -143,7 +146,7 @@ curl -sS -D - http://127.0.0.1:8160/v1/cue/tasks \
 | 코드 | 본문 | 언제 |
 | --- | --- | --- |
 | 200 | `ok` | `GET /healthz` |
-| 202 | `handoff_id`, `status: "received"`, `executed: false`, `forwarded` | 접수, 또는 같은 요청의 재전송 |
+| 202 | `handoff_id`, `status: "received"`, `executed: false`, `forwarded`, `forward_state` | 접수 커밋 뒤, 또는 같은 요청의 재전송 |
 | 400 | `invalid_request` + `fields` | 크기(64 KiB 초과는 인증보다 먼저 거절), Content-Type, JSON, 스키마 |
 | 400 | `task_id_not_allowed` | 본문 어딘가에 `task_id` 키가 있음 |
 | 400 | `reply_to_not_allowed` + `allowed` | `reply_to`를 쓸 수 없음 |
@@ -151,8 +154,9 @@ curl -sS -D - http://127.0.0.1:8160/v1/cue/tasks \
 | 409 | `idempotency_conflict` | 같은 키, 다른 본문 |
 | 409 | `sequence_conflict` | 같은 `(handoff_id, attempt, report_seq)`, 다른 본문 |
 | 500 | `internal` | 처리하지 못한 오류 |
+| 503 | `storage_unavailable` | `POST /v1/cue/tasks`에서 상태 DB를 쓰지 못함. `GET /healthz`는 `ok` |
 
-`forwarded: true`는 전달을 예약했다는 뜻이지, Grok Bot이 받았거나 처리했다는 뜻이 아닙니다.
+`forwarded: true`는 그 아웃박스 행이 Grok 2xx를 기록했을 때만입니다. 첫 `202`는 그 전에 나가므로 `forwarded`는 `false`입니다.
 `422`는 돌려주지 않습니다.
 
 ## 보안

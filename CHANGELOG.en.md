@@ -14,7 +14,14 @@ Pre-1.0, and bumped in a SemVer-like way.
 - A version bump happens inside the pull request being merged. That pull request updates `VERSION` and this changelog together.
 - The git tag `v0.0.1` is created only after merge, and only with user approval. The same applies to any other `vX.Y.Z` tag.
 
-`0.0.1` is the features and docs at `2483c3b`. Later documentation corrections stay under Unreleased until a version bump.
+`0.0.1` is the features and docs at `2483c3b`. Documentation-only corrections stay under `Unreleased (docs)` without a version bump.
+
+## Unreleased (docs)
+
+- README: with `CUE_STATE_DB` set, acceptance, signature-replay, and outbox rows are in SQLite; when empty they are memory only. Each attempt times out at 5 s, with at most 7 attempts inside 60 minutes. `forwarded: true` only after a recorded Grok 2xx. The response table now includes `forward_state` and `503`.
+- `AI_SETUP` and `SETUP`: removed pre-0.0.4 statements that retries, the outbox, and persistence were unimplemented, that `forwarded: true` only scheduled `add_task`, and that acceptance was memory-only. Sender resend rules match the current responses. The 2026-10-29 E2E record stays, with the 0.1.0 dummy live check (6/6) and one real Cue request accepted and forwarded (signature version unconfirmed) appended.
+- README, DESIGN, AI_SETUP, and SETUP (KO/EN): the acceptance log and row store `signature_version` `1` or `2`. The app reads eleven settings, including `CUE_STATE_DB` and `CUE_OUTBOX_POLL_SECONDS`.
+- `ABNORMAL_HANDLING.md`: corrected S3, §1.2, and §5.1 where they disagreed with the code, and marked implemented P0–P3 and the auth-log row [구현]. The P8 and P13 deployed marks stay. In §11-A, A8 is persistent SQLite replay when `CUE_STATE_DB` is set, A12 is outbox-worker redelivery, and A13 is dead after 7 attempts inside 60 minutes. A14 and A15 match the code too. §5.2 persistence and §7.1 are [구현]. Alerts, manual redelivery, and the state machine stay [미구현]. The baseline is 0.1.1. There is no English twin of this table.
 
 ## Unreleased
 

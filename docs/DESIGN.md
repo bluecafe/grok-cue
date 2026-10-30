@@ -19,11 +19,11 @@
 
 서명이 맞는 JSON을 접수합니다. 접수 응답은 `202`이고 `status`는 `received`입니다. `executed`는 항상 `false`입니다. 이 응답은 실행, 머지, 배포, 결제 승인이 아닙니다.
 
-`GROK_WEBHOOK_URL`과 `GROK_WEBHOOK_KEY`가 둘 다 있으면, 접수 뒤 정해진 10개 필드만 Grok에 넘깁니다([스펙](#스펙) 3번). 메일은 보내지 않습니다. 제한 시간은 5초입니다. 전달이 실패해도 이미 돌려준 `202`는 바뀌지 않습니다. 이미 본 세대보다 이전 `(attempt, report_seq)`는 저장만 하고 넘기지 않습니다.
+`GROK_WEBHOOK_URL`과 `GROK_WEBHOOK_KEY`가 둘 다 있으면, 접수 커밋 뒤 정해진 10개 필드만 Grok에 넘깁니다([스펙](#스펙) 3번). 메일은 보내지 않습니다. 한 시도의 제한 시간은 5초이고, 재시도는 첫 시도를 포함해 최대 7회, 첫 시도부터 60분 안입니다. 전달이 실패해도 이미 돌려준 `202`는 바뀌지 않습니다. 이미 본 세대보다 이전 `(attempt, report_seq)`는 저장만 하고 넘기지 않습니다.
 
 `GROK_WEBHOOK_KEY_HEADER`가 없으면 `Authorization: Bearer <GROK_WEBHOOK_KEY>`를 보냅니다. 헤더 이름을 적으면 그 헤더의 값으로 키만 보냅니다.
 
-`forwarded`가 `true`이면 이 요청에서 전달을 예약한 것입니다. Grok이 그 요청에 성공했다는 뜻은 아닙니다. 설정이 없거나 같은 본문의 재전송이면 `forwarded`는 `false`입니다.
+`forwarded`가 `true`이면 그 아웃박스 행이 Grok 2xx를 기록한 것입니다. 첫 `202`는 그 전에 나가므로 `forwarded`는 `false`입니다. 설정이 없으면 `forward_state`는 `disabled`입니다. 같은 본문을 다시 보내도 전달은 새로 하지 않고, `forwarded`는 그때의 아웃박스 상태입니다.
 
 본문에 없는 키는 거절합니다. `diff`, `patch`, `source`, 파일 본문, 비밀을 넣는 칸은 없습니다. 본문 상한은 64 KiB(65536바이트)입니다. 이 크기는 인증보다 먼저 검사하며, 넘으면 `400 invalid_request`(`fields`는 `body`)입니다.
 
@@ -109,9 +109,9 @@ Issue 본문에는 목표, 완료 조건, 실행할 테스트, `handoff_id`, `re
 ## 접수 응답
 
 ```json
-{"handoff_id":"<uuid>","status":"received","executed":false,"forwarded":false}
+{"handoff_id":"<uuid>","status":"received","executed":false,"forwarded":false,"forward_state":"queued"}
 ```
 
-같은 키와 같은 본문이면 `handoff_id`, `status`, `executed`는 첫 접수와 같고 `forwarded`는 `false`입니다. 로그에는 토큰, HMAC 키, Grok 키, 서명, 본문, 요약을 넣지 않습니다.
+같은 키와 같은 본문이면 `handoff_id`, `status`, `executed`는 첫 접수와 같습니다. `forwarded`와 `forward_state`는 그때의 아웃박스 상태입니다. 로그에는 토큰, HMAC 키, Grok 키, 서명, 본문, 요약을 넣지 않습니다. 검증을 통과해 접수되면 `signature_version=1` 또는 `2`만 로그와 접수 행에 남습니다.
 
 순서는 `(attempt, report_seq)` 사전순입니다. 이미 저장한 세대보다 이전이면 그 보고는 저장만 하고, 현재 세대는 바꾸지 않으며 Grok으로 넘기지 않습니다. 같은 `(handoff_id, attempt, report_seq)`에 다른 본문 바이트면 `409` `{"error":"sequence_conflict"}`이고 처음 접수는 남습니다. 같은 `idempotency_key`에 다른 본문은 `409` `{"error":"idempotency_conflict"}`입니다.

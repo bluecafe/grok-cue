@@ -178,7 +178,7 @@ Caddy를 다시 읽힌 뒤, 80번과 443번 포트가 서버 방화벽에서 열
 
 ## 4. 환경 변수
 
-환경값은 .env 한 곳입니다. 확인 스크립트도 그 파일을 읽습니다. 앱이 읽는 이름은 `app/settings.py`의 아홉 개입니다. `PUBLIC_BASE_URL`은 문서와 확인 스크립트만 읽고, 앱은 읽지 않습니다.
+환경값은 .env 한 곳입니다. 확인 스크립트도 그 파일을 읽습니다. 앱이 읽는 이름은 `app/settings.py`의 열한 개입니다. `PUBLIC_BASE_URL`은 문서와 확인 스크립트만 읽고, 앱은 읽지 않습니다.
 
 값을 만들 때는 토큰과 HMAC 키를 서로 다른 값으로 두 번 실행합니다.
 
@@ -202,6 +202,8 @@ GROK_WEBHOOK_URL=
 GROK_WEBHOOK_KEY=
 GROK_WEBHOOK_KEY_HEADER=
 PUBLIC_BASE_URL=https://hook.example.com
+CUE_STATE_DB=
+CUE_OUTBOX_POLL_SECONDS=5
 ```
 
 | 변수 | 필요 | 읽는 곳 | 의미 | 예시 |
@@ -215,6 +217,8 @@ PUBLIC_BASE_URL=https://hook.example.com
 | `GROK_WEBHOOK_URL` | 아니오 | 앱 | Grok 루틴이 받는 주소. 비우면 전달하지 않습니다 | 비움, 또는 `https://grok.example/hook` |
 | `GROK_WEBHOOK_KEY` | 아니오 | 앱 | 그 주소에 보내는 키. URL과 키가 둘 다 있어야 전달합니다 | 비움, 또는 따로 만든 키 |
 | `GROK_WEBHOOK_KEY_HEADER` | 아니오 | 앱 | 비우면 `Authorization: Bearer <GROK_WEBHOOK_KEY>`. 이름을 적으면 그 헤더의 값으로 키만 보냅니다 | 비움, 또는 `X-Grok-Key` |
+| `CUE_STATE_DB` | 아니오 | 앱 | 접수·서명 재생·아웃박스 SQLite 경로. 비우면 프로세스 메모리만 씁니다. 기본 경로는 없습니다 | 비움, 또는 `/var/lib/grok-cue/state.sqlite` |
+| `CUE_OUTBOX_POLL_SECONDS` | 아니오 | 앱 | 이 프로세스의 아웃박스 주기(초). 기본 5. 0 이하는 프로세스가 시작하지 않습니다. 시작 때도 한 번 pump합니다 | `5` |
 | `PUBLIC_BASE_URL` | 확인 스크립트 | 문서 전용 | 확인 스크립트가 부르는 주소. 앱은 읽지 않습니다. 비어 있으면 스크립트가 멈춥니다 | `https://hook.example.com` |
 
 선택 항목은 비어 있으면 꺼진 것과 같습니다. `GROK_WEBHOOK_URL`과 `GROK_WEBHOOK_KEY`를 예시처럼 비워 두면, 파일을 복사해도 Grok으로 넘기지 않습니다. 주소는 코드에 기본값으로 들어 있지 않습니다.
@@ -229,7 +233,7 @@ Cue는 `POST https://hook.example.com/v1/cue/tasks`로 JSON을 보냅니다. 로
 
 - `Authorization: Bearer <CUE_BRIDGE_TOKEN>`
 - `X-Cue-Timestamp`: 지금 Unix 초. 서버 시각과 300초 안이어야 합니다
-- `X-Cue-Signature`: HMAC-SHA256 hex(대소문자 구분 없음). `sha256=`은 붙이지 않습니다. 버전 헤더가 없으면 입력은 `{timestamp}.{raw_body}`(v1)입니다. `X-Cue-Signature-Version: 2`이면 입력은 `v2`, METHOD, PATH, timestamp, raw_body를 줄바꿈으로 이은 값입니다. 그 밖의 버전은 `401`입니다. v1은 아직 받습니다
+- `X-Cue-Signature`: HMAC-SHA256 hex(대소문자 구분 없음). `sha256=`은 붙이지 않습니다. 버전 헤더가 없으면 입력은 `{timestamp}.{raw_body}`(v1)입니다. `X-Cue-Signature-Version: 2`이면 입력은 `v2`, METHOD, PATH, timestamp, raw_body를 줄바꿈으로 이은 값입니다. 그 밖의 버전은 `401`입니다. v1은 아직 받습니다. 검증을 통과해 접수되면 로그와 접수 행에 `signature_version` `1` 또는 `2`만 남습니다. 서명 문자열은 로그에 넣지 않습니다
 - `Content-Type: application/json`
 
 서명의 점은 타임스탬프 문자열과 본문 바이트 사이에 하나만 있습니다. 본문을 다시 JSON으로 만들면 바이트가 달라져 서명이 맞지 않습니다. 처음 보낸 바이트를 보관합니다.
@@ -239,15 +243,16 @@ Cue는 `POST https://hook.example.com/v1/cue/tasks`로 JSON을 보냅니다. 로
 - 본문 바이트와 그 안의 `idempotency_key`는 그대로 둡니다.
 - `X-Cue-Timestamp`와 `X-Cue-Signature`만 새로 만듭니다.
 - 같은 서명을 그대로 다시 보내면 `401`입니다.
-- 서명을 새로 만든 같은 본문은 `202`이고, 처음과 같은 `handoff_id`를 돌려줍니다. Grok 전달은 다시 하지 않습니다.
-- 같은 `idempotency_key`로 다른 본문을 보내면 `409`입니다.
+- 서명을 새로 만든 같은 본문은 `202`이고, 처음과 같은 `handoff_id`를 돌려줍니다. Grok 전달은 다시 하지 않습니다. `forwarded`는 그때의 아웃박스 상태이고, Grok 2xx가 기록된 뒤에만 `true`입니다.
+- 같은 `idempotency_key`로 다른 본문을 보내면 `409 idempotency_conflict`입니다.
+- 같은 `(handoff_id, attempt, report_seq)`로 다른 본문을 보내면 `409 sequence_conflict`입니다. 이전 세대는 저장만 하고 전달하지 않습니다.
 
 `reply_to`를 생략하면 `REPLY_TO_DEFAULT`를 씁니다. 그 주소는 `REPLY_TO_ALLOWLIST`에 있어야 합니다. 본문 필드의 이름과 길이는 [DESIGN.md](DESIGN.md)와 같습니다. `task_id` 키는 넣지 않습니다.
 
 ### Cue 쪽 설정
 
 > [!NOTE]
-> **2026-10-29 확인:** 현재 Cue 환경이 서명된 JSON POST를 실제로 보냈고, HTTP `202`와 `status`=`received`, `executed`=`false`, `forwarded`=`true`를 받았습니다. 하류 수신은 16:05 KST에 확인되었습니다. 이 결과는 현재 Cue 환경의 요청 한 건만을 증명합니다. Cue 채팅의 모든 작업이 자동으로 보내진다는 뜻이 아니고, 다른 환경의 설치 호환도 증명하지 않습니다. `202`와 `forwarded: true`는 접수되고 전달되었다는 뜻입니다. 작업 완료가 아닙니다. 아래는 Cue의 화면이나 메뉴가 아니라, 보내는 쪽이 지켜야 하는 일반 요구 사항입니다.
+> **2026-10-29 확인:** 그 환경이 서명된 JSON POST를 실제로 보냈고, HTTP `202`와 `status`=`received`, `executed`=`false`, `forwarded`=`true`를 받았습니다. 하류 수신은 16:05 KST에 노른(사용자)가 확인했습니다. 이 기록은 그 요청 한 건만 말합니다. 그 뒤 0.1.0 더미 실서버 확인은 6/6 통과입니다. Cue 실제 요청 1건이 접수되고 전달되었으며, 그 요청의 서명 버전은 확인되지 않았습니다. 지금의 `forwarded: true`는 Grok 2xx가 기록된 뒤에만입니다. 아래는 Cue의 화면이나 메뉴가 아니라, 보내는 쪽이 지켜야 하는 일반 요구 사항입니다.
 
 Cue 쪽 흐름:
 
@@ -276,7 +281,7 @@ Cue 쪽 흐름:
 
 ### Grok이 받을 알림
 
-`GROK_WEBHOOK_URL`과 `GROK_WEBHOOK_KEY`가 둘 다 있으면, 접수 뒤 Bridge가 그 주소로 JSON을 보냅니다. 제한 시간은 5초입니다. 실패해도 Cue에게 이미 돌려준 `202`는 바뀌지 않습니다.
+`GROK_WEBHOOK_URL`과 `GROK_WEBHOOK_KEY`가 둘 다 있으면, 접수 커밋 뒤 Bridge가 그 주소로 JSON을 보냅니다. 한 시도의 제한 시간은 5초입니다. 재시도는 첫 시도를 포함해 최대 7회, 첫 시도부터 60분 안입니다. 실패해도 Cue에게 이미 돌려준 `202`는 바뀌지 않습니다.
 
 Grok 루틴은 그 주소에서 POST를 받습니다. `GROK_WEBHOOK_KEY_HEADER`가 비어 있으면 헤더는 `Authorization: Bearer <GROK_WEBHOOK_KEY>`입니다. 헤더 이름을 적으면 그 이름의 값으로 키만 옵니다. Bearer 접두사는 붙지 않습니다.
 
@@ -286,7 +291,7 @@ Grok 루틴은 그 주소에서 POST를 받습니다. `GROK_WEBHOOK_KEY_HEADER`�
 
 `schema_version`, `title`, `created_at`, `reply_to`, `requested_by`는 포함되지 않습니다. 메일은 이 프로세스가 보내지 않습니다.
 
-`202`와 `forwarded: true`는 그 요청이 접수되고 전달되었다는 뜻입니다. 작업 완료가 아니고, Grok 루틴이 성공했다는 뜻도 아닙니다. URL이나 키가 없거나, 같은 본문을 다시 받은 경우에는 `forwarded`가 `false`입니다. `executed`는 항상 `false`입니다.
+`202`는 접수를 커밋한 뒤의 응답입니다. `forwarded: true`는 그 행이 Grok 2xx를 기록했을 때만입니다. 첫 `202`의 `forwarded`는 `false`입니다. URL이나 키가 없으면 `forward_state`는 `disabled`입니다. 같은 본문을 다시 받아도 전달은 새로 하지 않습니다. `executed`는 항상 `false`입니다.
 
 ## 6. 동작 확인
 
@@ -308,7 +313,7 @@ curl -sS -D - https://hook.example.com/healthz
 저장소에 들어 있는 스크립트입니다. 표준 라이브러리만 씁니다. `.env`를 셸로 불러오지 않고 스크립트 안의 작은 `KEY=VALUE` 파서로 읽으므로, 값에 `&`, `$`, `;` 같은 문자가 있어도 셸이 해석하지 않고, 비밀값이 셸 환경에 남지도 않습니다.
 
 - **기본은 dry-run입니다.** 서명된 시험 요청을 만들어 요약(대상 주소, 시험용 `handoff_id`, 본문 크기, 전달 설정 여부)만 출력하고 **아무것도 보내지 않습니다.** 토큰과 서명은 `<hidden>`으로 가립니다.
-- **`--send`를 붙일 때만** 실제로 요청을 보냅니다. 헬스 체크 `200`, 서명 없는 POST `401`, 서명된 첫 POST `202`, 같은 본문 재전송 `202`(같은 `handoff_id`, `forwarded=false`), 같은 키의 다른 본문 `409`를 차례로 확인합니다.
+- **`--send`를 붙일 때만** 실제로 요청을 보냅니다. 헬스 체크 `200`, 서명 없는 POST `401`, 서명된 첫 POST `202`, 같은 본문 재전송 `202`(같은 `handoff_id`, 다시 전달하지 않음), 같은 키의 다른 본문 `409`를 차례로 확인합니다. 스크립트는 그 재전송의 `forwarded`를 `false`로 기대합니다. 서버의 `forwarded`는 그때의 아웃박스 상태이고, Grok 2xx가 기록된 뒤에만 `true`입니다.
 - 시험용 값만 씁니다. `title`은 `[TEST] connectivity check`, `summary`는 `connectivity test — not a real task`, `handoff_id`와 `idempotency_key`는 실행할 때마다 새로 만듭니다. 상태 값과 필드는 스펙 그대로입니다.
 
 설치 폴더에서 실행합니다. 로컬만 볼 때는 `.env`의 `PUBLIC_BASE_URL`을 `http://127.0.0.1:8160`으로 둡니다.
@@ -331,8 +336,9 @@ sudo -u bridge .venv/bin/python scripts/check_bridge.py --send     # 전달을 �
 | `400` `task_id_not_allowed` | 본문 어딘가에 `task_id`가 있습니다 | 그 키를 빼고 `handoff_id`만 씁니다 |
 | `409` `idempotency_conflict` | 같은 `idempotency_key`로 다른 본문 바이트를 보냈습니다 | 처음 보낸 바이트를 그대로 다시 보냅니다. JSON 키 순서만 바뀌어도 다른 본문입니다. 첫 접수는 그대로 남습니다 |
 | `409` `sequence_conflict` | 같은 `(handoff_id, attempt, report_seq)`로 다른 본문 바이트를 보냈습니다 | 그 세대의 첫 본문을 유지합니다. 이전 세대는 저장만 하고 전달하지 않습니다 |
-| `202`인데 `forwarded`가 `false` | 이번 요청에서 Grok 전달을 예약하지 않았습니다 | `GROK_WEBHOOK_URL`과 `GROK_WEBHOOK_KEY`가 둘 다 있는지 봅니다. 하나라도 비어 있으면 전달하지 않습니다. 같은 본문의 재전송도 `forwarded`가 `false`입니다 |
-| `202`인데 Grok에 도착하지 않음 | 예약과 성공은 다릅니다. 전달 실패도 Cue의 `202`는 바뀌지 않습니다 | URL이 Grok 루틴의 수신 주소인지, 키 헤더 이름이 루틴과 같은지 봅니다. 제한 시간은 5초입니다 |
+| `503` `storage_unavailable` | `POST /v1/cue/tasks`가 상태 DB를 쓰지 못했습니다. `GET /healthz`는 `ok`일 수 있습니다 | `CUE_STATE_DB` 디렉터리를 쓸 수 있는지 봅니다. `ProtectSystem=strict`이면 `ReadWritePaths`가 필요합니다 |
+| `202`인데 `forwarded`가 `false` | 아직 Grok 2xx가 기록되지 않았거나 전달이 꺼져 있습니다 | 웹훅이 켜져 있으면 첫 `202`는 `forward_state` `queued`가 정상입니다. URL과 키가 하나라도 비어 있으면 `disabled`입니다. `delivered`가 된 뒤의 재전송만 `forwarded`가 `true`입니다 |
+| `202`인데 Grok에 도착하지 않음 | 첫 `202`는 2xx를 기다리지 않습니다. 실패해도 그 `202`는 바뀌지 않습니다 | URL과 키 헤더 이름을 봅니다. 한 시도는 5초이고, 재시도는 최대 7회, 60분 안입니다 |
 | `dig` 결과가 비어 있음 | DNS가 아직 이 서버를 가리키지 않습니다 | A 또는 AAAA 이름과 값을 확인합니다. 퍼질 때까지 기다린 뒤 `dig`와 `nslookup`을 다시 실행합니다 |
 | 브라우저 또는 curl이 인증서 오류 | HTTPS 인증서를 받지 못했습니다 | DNS가 이 서버를 가리키는지, 80번과 443번이 열려 있는지, Caddyfile의 이름이 `hook.example.com`인지, Caddy가 실행 중인지 봅니다 |
 | 로컬 `8160`은 되는데 도메인은 안 됨 | 프록시 앞단입니다 | `uvicorn`이 `127.0.0.1:8160`에 있는지, Caddy의 `reverse_proxy`가 그 주소인지 봅니다. 8160을 인터넷에 열 필요는 없습니다 |

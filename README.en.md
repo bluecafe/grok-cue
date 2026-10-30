@@ -28,11 +28,11 @@ Setup guides: [docs/SETUP.en.md](docs/SETUP.en.md) (for people) and [docs/AI_SET
 - Idempotency by `idempotency_key`: same bytes return the original `202`, different bytes return `409`.
 - Strict body validation (64 KiB limit, `application/json`, `github_ref` shape, no `task_id` anywhere).
 - `reply_to` limited to an env-configured allowlist of single email addresses.
-- Optional forwarding of a fixed set of 10 fields (`handoff_id`, `attempt`, `report_seq`, `repo`, `github_ref`, `status`, `summary`, `links`, `next_owner`, `idempotency_key`; [spec](docs/DESIGN.en.md#spec)) to `GROK_WEBHOOK_URL` in the background, with a 5 s timeout.
-- Secrets (tokens, keys, signatures) and request bodies are kept out of logs.
+- Optional forwarding of a fixed set of 10 fields (`handoff_id`, `attempt`, `report_seq`, `repo`, `github_ref`, `status`, `summary`, `links`, `next_owner`, `idempotency_key`; [spec](docs/DESIGN.en.md#spec)) to `GROK_WEBHOOK_URL`. Each attempt times out at 5 s. Retries are at most 7 attempts including the first, inside 60 minutes from the first attempt.
+- Secrets (tokens, keys, signatures) and request bodies are kept out of logs. A verified acceptance logs only `signature_version=1` or `2` and stores that integer on the acceptance row. The response body has no version.
 - `GET /healthz` for liveness.
 
-Idempotency and replay state live in process memory and are lost on restart.
+When `CUE_STATE_DB` is set, acceptance, signature-replay, and outbox rows stay in that SQLite file. When it is empty, they stay in process memory and are lost on restart.
 
 ## How it works
 
@@ -43,7 +43,7 @@ Idempotency and replay state live in process memory and are lost on restart.
 ```
 
 Forwarding happens only when both `GROK_WEBHOOK_URL` and `GROK_WEBHOOK_KEY` are set, and only for the
-first acceptance of an idempotency key. A forwarding failure never changes the `202` already returned.
+first acceptance of an idempotency key. The `202` is returned after that acceptance is committed. The first `202` has `forwarded: false`. `forwarded: true` only after that row records a Grok 2xx. A forwarding failure does not change the `202` already returned; the worker retries inside the limit.
 
 ## Install
 
@@ -106,6 +106,8 @@ Restart the process after changes.
 | `GROK_WEBHOOK_URL` | no | Forward target. Empty disables forwarding |
 | `GROK_WEBHOOK_KEY` | no | Key sent to the forward target |
 | `GROK_WEBHOOK_KEY_HEADER` | no | Empty: `Authorization: Bearer <key>`. Set: send the bare key in this header |
+| `CUE_STATE_DB` | no | SQLite path for acceptance, replay, and the outbox. Empty: process memory only. No built-in path |
+| `CUE_OUTBOX_POLL_SECONDS` | no | Outbox poll interval in seconds for this process. Default 5. Values ≤ 0 are rejected. Also pumps once at startup |
 
 `PUBLIC_BASE_URL` (for example `https://hook.example.com`) is read only by docs and check scripts; the app ignores it.
 
@@ -121,6 +123,7 @@ Every `POST /v1/cue/tasks` needs all of:
 - No version header means v1. The input is `{timestamp}.{raw_body}`.
 - `X-Cue-Signature-Version: 2` means v2. The input is `v2`, METHOD, PATH, timestamp, and raw_body, joined by newlines. Example: METHOD `POST`, PATH `/v1/cue/tasks`.
 - Any other version value is `401`. v1 is not rejected yet. Rejecting v1 is a proposal for a later version and is not implemented.
+- A verified acceptance logs and stores `signature_version` `1` or `2`. The signature string is not logged.
 
 To retry, keep the exact body bytes and compute a new timestamp and signature.
 
@@ -140,7 +143,7 @@ Field reference: [docs/DESIGN.en.md](docs/DESIGN.en.md).
 
 ### Idempotency
 
-Same `idempotency_key` + same bytes → the original `202` with `forwarded: false`; no second notify or forward.
+Same `idempotency_key` + same bytes → `202` with the original `handoff_id`; no second notify or forward. `forwarded` and `forward_state` are the outbox state at that moment.
 Same key + different bytes (even reordered JSON keys) → `409 idempotency_conflict`. Requests rejected for `reply_to` do not reserve the key.
 Same `(handoff_id, attempt, report_seq)` + different bytes → `409 sequence_conflict`. An older generation is stored only; the current generation and its forward are left unchanged.
 
@@ -149,7 +152,7 @@ Same `(handoff_id, attempt, report_seq)` + different bytes → `409 sequence_con
 | Code | Body | When |
 | --- | --- | --- |
 | 200 | `ok` | `GET /healthz` |
-| 202 | `handoff_id`, `status: "received"`, `executed: false`, `forwarded` | Accepted or idempotent replay |
+| 202 | `handoff_id`, `status: "received"`, `executed: false`, `forwarded`, `forward_state` | After the acceptance commit, or an idempotent replay |
 | 400 | `invalid_request` + `fields` | Size (over 64 KiB is rejected before auth), content type, JSON, schema |
 | 400 | `task_id_not_allowed` | A `task_id` key anywhere in the body |
 | 400 | `reply_to_not_allowed` + `allowed` | `reply_to` not usable |
@@ -157,8 +160,9 @@ Same `(handoff_id, attempt, report_seq)` + different bytes → `409 sequence_con
 | 409 | `idempotency_conflict` | Same key, different body |
 | 409 | `sequence_conflict` | Same `(handoff_id, attempt, report_seq)`, different body |
 | 500 | `internal` | Unhandled error |
+| 503 | `storage_unavailable` | `POST /v1/cue/tasks` could not use the state database. `GET /healthz` stays `ok` |
 
-`forwarded: true` means a forward was scheduled, not that Grok Bot received or acted on it.
+`forwarded: true` only after that outbox row records a Grok 2xx. The first `202` is sent before that, so `forwarded` is `false`.
 `422` is never returned.
 
 ## Security
