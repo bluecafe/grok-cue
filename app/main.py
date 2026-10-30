@@ -152,23 +152,41 @@ def create_app(
         header_ts = request.headers.get("x-cue-timestamp")
         header_sig = request.headers.get("x-cue-signature")
         bearer = parse_bearer(request.headers.get("authorization"))
+        if header_ts is None or not header_ts.strip():
+            logger.info("auth failed reason=missing_timestamp")
+            return unauthorized()
         ts = parse_unix_timestamp(header_ts)
-        if ts is None or abs(now - float(ts)) > SKEW_SECONDS:
+        if ts is None:
+            logger.info("auth failed reason=malformed_timestamp")
+            return unauthorized()
+        if abs(now - float(ts)) > SKEW_SECONDS:
+            logger.info("auth failed reason=timestamp_out_of_window")
             return unauthorized()
 
-        timestamp = (header_ts or "").strip()
-        token_ok = bearer_matches(bearer or "", bridge.settings.bearer_tokens())
-        sig_ok = signature_matches(
+        timestamp = header_ts.strip()
+        reasons: list[str] = []
+        if bearer is None:
+            reasons.append("missing_bearer")
+        elif not bearer_matches(bearer, bridge.settings.bearer_tokens()):
+            reasons.append("bearer_rejected")
+        signature = (header_sig or "").strip()
+        if not signature:
+            reasons.append("missing_signature")
+        elif not signature_matches(
             header_sig,
             bridge.settings.hmac_keys(),
             timestamp,
             raw,
-        )
-        if not token_ok or not sig_ok:
+        ):
+            reasons.append("signature_rejected")
+        if reasons:
+            # Reason codes only. Never the token, key, signature, or body.
+            logger.info("auth failed reason=%s", ",".join(reasons))
             return unauthorized()
 
         # A fully authenticated signature is spent. Retries must re-sign.
-        if bridge.replay.seen_or_remember((header_sig or "").strip().lower(), ts, now):
+        if bridge.replay.seen_or_remember(signature.lower(), ts, now):
+            logger.info("auth failed reason=replay")
             return unauthorized()
 
         content_type = request.headers.get("content-type", "")

@@ -12,6 +12,7 @@ from app.forward import (
     FORWARD_FIELDS,
     FORWARD_TIMEOUT_SECONDS,
     GrokForwarder,
+    classify_http_status,
     forward_headers,
 )
 from tests.conftest import Harness, build_harness
@@ -191,6 +192,46 @@ def test_default_forward_header_is_bearer() -> None:
         for name, value in capture.requests[0].headers.raw
     ]
     assert f"Authorization: Bearer {GROK_KEY}" in raw
+
+
+def test_forward_outcome_classification(caplog: pytest.LogCaptureFixture) -> None:
+    assert classify_http_status(200) == "delivered"
+    assert classify_http_status(204) == "delivered"
+    assert classify_http_status(408) == "retryable"
+    assert classify_http_status(425) == "retryable"
+    assert classify_http_status(429) == "retryable"
+    assert classify_http_status(500) == "retryable"
+    assert classify_http_status(599) == "retryable"
+    assert classify_http_status(400) == "dead"
+    assert classify_http_status(401) == "dead"
+    assert classify_http_status(404) == "dead"
+    assert classify_http_status(302) == "dead"
+
+    caplog.set_level("INFO", logger="grok_cue")
+    for status, outcome_class in ((204, "delivered"), (400, "dead"), (503, "retryable")):
+        capture = Capture(status=status)
+        harness = _harness(capture)
+        response = harness.post(
+            task_body(
+                idempotency_key=f"idem-class-{status}",
+                summary="SUMMARY_NOT_FOR_GROK_LOG",
+            )
+        )
+        assert response.status_code == 202
+        assert response.json()["forwarded"] is True
+        assert f"outcome=http status={status} class={outcome_class}" in caplog.text
+        harness.http.close()
+
+    connect = Capture(error=httpx.ConnectError("down"))
+    connect_harness = _harness(connect)
+    connect_response = connect_harness.post(task_body(idempotency_key="idem-class-connect"))
+    assert connect_response.status_code == 202
+    assert "outcome=connection_error class=retryable" in caplog.text
+    assert connect.requests == []
+    connect_harness.http.close()
+
+    assert GROK_KEY not in caplog.text
+    assert "SUMMARY_NOT_FOR_GROK_LOG" not in caplog.text
 
 
 def test_custom_forward_header_sends_the_raw_key() -> None:

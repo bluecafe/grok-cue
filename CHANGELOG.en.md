@@ -2,7 +2,7 @@
 
 # Changelog
 
-The current version is `0.0.1`. The value lives only in [`VERSION`](VERSION) at the repository root. The app does not read that file, and no response, including `/healthz`, includes the version.
+The current version is `0.0.2`. The value lives only in [`VERSION`](VERSION) at the repository root. The app does not read that file, and no response, including `/healthz`, includes the version.
 
 ## Version rules
 
@@ -25,6 +25,15 @@ Pre-1.0, and bumped in a SemVer-like way.
 - The 2026-10-29 E2E is one successful request record. Grok-side receipt was confirmed separately by Norn (user) at 16:05 KST.
 - In docs and READMEs the owner is 노른(사용자) in Korean and Norn (user) in English. There was no existing personal-name wording to replace.
 - Versioning was added only in `VERSION`, this changelog, and one README line. Application code was not changed, and no tag was created.
+
+## 0.0.2 — 2026-10-30
+
+PATCH. `0.1.0` is reserved for the BREAKING release with P8 HMAC v2 and the P13 sequence fields. The request fields, the signature, and the meaning of the `202` response are unchanged. There are no retries and no outbox.
+
+### Features
+
+- Grok forward results are classified. 2xx is `delivered`. Timeout, connection errors, 408, 425, 429, and 5xx are `retryable`. Any other HTTP status is `dead`. An unexpected exception is also `dead`: it is not a timeout or a connection error, so it is not a retry candidate, and retrying an unknown failure could repeat a partial side effect. The log keeps the class and status code only, not the webhook key or the body. `forwarded` still means delivery was scheduled, not that a 2xx was confirmed.
+- Auth-failure logs contain only a reason code. Tokens, HMAC keys, signatures, request bodies, and summaries are not logged.
 
 ## 0.0.1
 
