@@ -2,7 +2,7 @@
 
 # Changelog
 
-The current version is `0.1.0`. The value lives in [`VERSION`](VERSION) at the repository root. The app reads that file only for the FastAPI `version` field. No response body, including `/healthz`, includes the version.
+The current version is `0.1.1`. The value lives in [`VERSION`](VERSION) at the repository root. The app reads that file only for the FastAPI `version` field. No response body, including `/healthz`, includes the version.
 
 ## Version rules
 
@@ -25,6 +25,20 @@ Pre-1.0, and bumped in a SemVer-like way.
 - The 2026-10-29 E2E is one successful request record. Grok-side receipt was confirmed separately by Norn (user) at 16:05 KST.
 - In docs and READMEs the owner is 노른(사용자) in Korean and Norn (user) in English. There was no existing personal-name wording to replace.
 - Versioning was added only in `VERSION`, this changelog, and one README line. Application code was not changed, and no tag was created.
+
+## 0.1.1 — 2026-10-30
+
+PATCH. The signature and the request fields are unchanged.
+
+### Features
+
+- A request that passes verification and is accepted logs `signature_version=1` or `2`. The signature and secrets are not logged.
+- The same value is stored on the acceptance row as `idempotency.signature_version`. An existing database gains that nullable column once if it is missing. Old rows stay NULL.
+
+### Docs
+
+- The design example JSON has 13 keys. The two optional schema fields, `reply_to` and `requested_by`, are omitted from the 15-field schema.
+- Section 12 marks P8 and P13 implemented and deployed. The source is the 0.1.0 dummy live check, 6/6 passed. Cue real-request verification stays unconfirmed.
 
 ## 0.1.0 — 2026-10-30
 

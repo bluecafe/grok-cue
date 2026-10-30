@@ -140,6 +140,7 @@ Cue 실행이 쓰는 GitHub App, 토큰, 또는 브라우저 세션이 그 순�
 - 키: 기본·보조 토큰과 HMAC 키 각 1개(`settings.py`)
 - 테스트: `test_hmac_is_sha256_of_timestamp_dot_raw_body`, `test_timestamp_inside_window_is_accepted`, `test_timestamp_outside_window_is_unauthorized`, `test_same_signature_replay_is_unauthorized`, `test_secondary_hmac_key_is_accepted`, `test_bearer_and_hmac_are_both_required`, `test_filter_redacts_configured_secrets`, `test_request_logs_omit_secrets_and_summary`
 - 헤더 `X-Cue-Signature-Version`이 없으면 v1입니다. 값 `2`만 v2입니다. 그 밖의 값은 401입니다. v1은 아직 거절하지 않습니다. [구현] (0.1.0)
+- 검증을 통과해 접수되면 접수 로그에 `signature_version=1` 또는 `2`만 남깁니다. 서명과 비밀은 로그에 넣지 않습니다. 같은 값을 접수 행 `idempotency.signature_version`에 저장합니다. 예전 행은 NULL이고, 그 열이 없으면 열 때만 추가합니다. [구현] (0.1.1)
 
 ### 5.2 개선 제안 [제안·미구현, 일부 결정]
 | 항목 | 제안 | 상태 | 테스트(제안) |
@@ -456,10 +457,10 @@ stateDiagram-v2
 5. Bridge 응답 `202`는 접수일 뿐입니다(1.2). 상태는 T03으로 `needs_input`이 되고, Grok 측 답변 메일(T09)로 이어집니다.
 
 - Cue 쓰기 범위는 브랜치·PR·Issue 댓글, 머지 금지 [결정]. 현재는 소유자 계정을 공유하므로 권한은 과하게 넓고, main 직접 push만 브랜치 보호로 막히며 머지 금지는 문서로만 지켜집니다(2.1). 권한이 없으면 3단계 없이 `needs_input`에 사유만 적습니다.
-- 아래는 요청 본문 15필드 스키마를 따른 예시입니다. Grok에 전달되는 필드는 10개(`handoff_id`, `attempt`, `report_seq`, `repo`, `github_ref`, `status`, `summary`, `links`, `next_owner`, `idempotency_key`)입니다.
+- 아래는 요청 본문 15필드 스키마를 따른 예시입니다. Grok에 전달되는 필드는 10개(`handoff_id`, `attempt`, `report_seq`, `repo`, `github_ref`, `status`, `summary`, `links`, `next_owner`, `idempotency_key`)입니다. 이 예시의 키는 13개입니다. 스키마 15개 중 선택 필드 `reply_to`와 `requested_by`를 뺐기 때문입니다.
 
 ```json
-{"schema_version":"1","handoff_id":"0f6c2d1e-0000-4000-8000-000000000001","attempt":1,"report_seq":1,"repo":"bluecafe/grok-cue","github_ref":{"repo":"bluecafe/grok-cue","base_branch":"main","start_sha":"2483c3b8bdc9fde400498bba809f53147aa34095","issue_or_pr_number":2},"idempotency_key":"cue-0f6c2d1e-review-1","title":"설계 문서 검토","status":"needs_input","summary":"설계 문서 검토 결과 수정 요청을 Issue 댓글로 남김. Grok 확인 필요","created_at":"2026-10-30T08:00:00Z","links":["https://github.com/bluecafe/grok-cue/issues/2#issuecomment-1"],"next_owner":"grok"}
+{"schema_version":"1","handoff_id":"0f6c2d1e-0000-4000-8000-000000000001","attempt":1,"report_seq":1,"repo":"example/repo","github_ref":{"repo":"example/repo","base_branch":"main","start_sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","issue_or_pr_number":2},"idempotency_key":"example-key-1","title":"example review","status":"needs_input","summary":"example summary","created_at":"2026-10-30T08:00:00Z","links":["https://github.com/example/repo/issues/2#issuecomment-1"],"next_owner":"example"}
 ```
 (번호·링크·키는 예시 값입니다.)
 
@@ -484,17 +485,17 @@ stateDiagram-v2
 | P5 | 사용자(owner) 이메일 알림(8.1) | 가짜 수신처 dead 1건 → 알림 1건 |
 | P6 | 상태 계약(9절) | `test_transition_table_matches_doc`, `test_terminal_states_never_change`, `test_cancel_report_moves_to_cancelled`, 10.2 테스트들 |
 | P7 | (결정 후) handoff 등록, 404·409 | `test_unknown_handoff_404`, `test_handoff_mismatch_409` |
-| P8 | HMAC v2(메서드·경로) + 5.3 수용 [구현] (0.1.0). v1은 아직 받음 | `test_v2_signature_binds_method_and_path`, `test_v1_v2_overlap_window`, `test_unknown_signature_version_401` |
+| P8 | HMAC v2(메서드·경로) + 5.3 수용 [구현·배포] (0.1.0). 출처: 0.1.0 더미 실서버 확인 6/6 통과. Cue 실제 요청 검증은 [미확인]. v1은 아직 받음 | `test_v2_signature_binds_method_and_path`, `test_v1_v2_overlap_window`, `test_unknown_signature_version_401` |
 | P9 | T1·T2 감시(둘 다 24시간) | 가짜 시계 → `stale`/`expired` |
 | P10 | (결정 후) completed 검증(4.2) | 정상 / 링크 404 / SHA 없음 |
 | P11 | (결정 후) 취소 | `test_cancel_idempotent`, `test_result_after_cancel_recorded` |
 | P12 | 민감정보 검사, 422 거부 | 가짜 패턴 → 422, 로그 원문 없음 |
-| P13 | `attempt`/`report_seq`(10.1) [구현] (0.1.0) | `test_spec.py`·`test_forward_fields` 갱신, `test_sequence_conflict_409`, `test_older_generation_is_recorded_without_changing_state` |
+| P13 | `attempt`/`report_seq`(10.1) [구현·배포] (0.1.0). 출처: 0.1.0 더미 실서버 확인 6/6 통과. Cue 실제 요청 검증은 [미확인] | `test_spec.py`·`test_forward_fields` 갱신, `test_sequence_conflict_409`, `test_older_generation_is_recorded_without_changing_state` |
 
 P3은 응답 의미를 바꾸므로(첫 202가 `forwarded:false`) Grok·Cue 공지가 함께 필요합니다.
 
 ### 12.1 버전 관리
-- 루트 `VERSION`은 **0.1.0**입니다. `CHANGELOG.md`와 `CHANGELOG.en.md`가 있습니다. 이 파일들은 PR #2에서 추가되었습니다. `0.0.1`은 main `2483c3b`의 기능과 문서입니다. 앱은 이 파일을 FastAPI `version` 필드에만 읽습니다.
+- 루트 `VERSION`은 **0.1.1**입니다. `CHANGELOG.md`와 `CHANGELOG.en.md`가 있습니다. 이 파일들은 PR #2에서 추가되었습니다. `0.0.1`은 main `2483c3b`의 기능과 문서입니다. 앱은 이 파일을 FastAPI `version` 필드에만 읽습니다.
 - 1.0 전: 문서·버그 = PATCH, 기능 = MINOR, 호환 깨짐(서명·필드) = MINOR + **BREAKING**
 - 버전은 머지되는 PR 안에서 올림. 태그는 사용자(owner) 승인 후에만
 - 목표: P0는 0.0.1 안에 포함(버전 올림 없음), P1 = 0.0.2. **0.1.0 = P13 순번 필드 + P8 HMAC v2 (BREAKING)** [결정]. 0.1.0 전의 비호환 없는 단계는 0.0.x PATCH로 올리고, 0.1.0은 P8과 P13 전용, P3 = 0.0.x PATCH(응답 의미 변경 공지)

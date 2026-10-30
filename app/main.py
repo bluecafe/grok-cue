@@ -331,6 +331,7 @@ def create_app(
                     handoff_id=str(model.handoff_id),
                     attempt=model.attempt,
                     report_seq=model.report_seq,
+                    signature_version=sig_version,
                     forward_payload=forward_payload,
                     forwarding=forward_payload is not None,
                 )
@@ -368,6 +369,7 @@ def create_app(
                 handoff_id=str(result.response["handoff_id"]),
                 repo=model.repo,
                 reply_to=reply_to,
+                signature_version=sig_version,
             )
             _forwarded, forward_state = bridge.outbox.view(model.idempotency_key)
             if forward_state == "queued" and bridge.auto_pump:
