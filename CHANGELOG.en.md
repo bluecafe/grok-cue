@@ -2,7 +2,7 @@
 
 # Changelog
 
-The current version is `0.0.1`. The value lives only in [`VERSION`](VERSION) at the repository root. The app does not read that file, and no response, including `/healthz`, includes the version.
+The current version is `0.1.0`. The value lives only in [`VERSION`](VERSION) at the repository root. The app does not read that file, and no response, including `/healthz`, includes the version.
 
 ## Version rules
 
@@ -17,6 +17,17 @@ Pre-1.0, and bumped in a SemVer-like way.
 `0.0.1` is the features and docs at `2483c3b`. Later documentation corrections stay under Unreleased until a version bump.
 
 ## Unreleased
+
+## 0.1.0
+
+MINOR. The request fields, the signature, and the meaning of the `202` response are unchanged. This is not BREAKING. There are no retries and no outbox.
+
+### Features
+
+- Grok forward results are classified. 2xx is `delivered`. Timeout, connection errors, 408, 425, 429, and 5xx are `retryable`. Any other HTTP status is `dead`. The log keeps the class and status code only, not the webhook key or the body. `forwarded` still means delivery was scheduled, not that a 2xx was confirmed.
+- Auth-failure logs contain only a reason code. Tokens, HMAC keys, signatures, request bodies, and summaries are not logged.
+
+### Docs
 
 - Section 2.1 separates what the repository owner account can technically do from the actual scope of the credential Cue uses. Unverified credential scopes are marked unverified. An external review PR is a record: merge the incorporation PR first, then the operator merges the review PR and comments with that link, and nobody on our side commits to the Cue branch. A `needs_input` handoff is closed as `completed` when the owner sends the reply email drafted by the planner.
 - Added the abnormal-handling analysis and design document at `docs/ABNORMAL_HANDLING.md`. Items written as proposals are not implemented.

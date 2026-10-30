@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import logging
+
 import pytest
 
 from app.auth import hmac_sha256_hex
 from tests.conftest import Harness
-from tests.support import HMAC_KEY, task_body
+from tests.support import HMAC_KEY, TOKEN, task_body
 
 PINNED_HMAC = "bbb8be9666a8373efa71ffb4bbed69890ab4d7572cba1792c6bfede89cabdbef"
 
@@ -88,3 +90,44 @@ def test_secondary_bearer_is_accepted(harness_factory) -> None:
     harness = harness_factory(token_secondary="secondary-token")
     response = harness.post(task_body(), token="secondary-token")
     assert response.status_code == 202
+
+
+def test_auth_reason_log_has_no_secret(
+    harness: Harness,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.INFO, logger="grok_cue")
+    bad_token = "client-supplied-token"
+    bad_signature = "ab" * 32
+    summary = "SUMMARY_SHOULD_NOT_BE_LOGGED"
+    denied = harness.post(
+        task_body(summary=summary, idempotency_key="idem-auth-reason"),
+        token=bad_token,
+        signature=bad_signature,
+        timestamp=int(harness.now) + 1,
+    )
+    skew = harness.post(
+        task_body(summary=summary, idempotency_key="idem-auth-skew"),
+        timestamp=int(harness.now) + 301,
+    )
+    missing_ts = harness.post(
+        task_body(summary=summary, idempotency_key="idem-auth-missing-ts"),
+        drop=("X-Cue-Timestamp",),
+    )
+    ok = harness.post(task_body(summary=summary, idempotency_key="idem-auth-ok"))
+    replay = harness.post(task_body(summary=summary, idempotency_key="idem-auth-ok"))
+    assert denied.status_code == 401
+    assert skew.status_code == 401
+    assert missing_ts.status_code == 401
+    assert ok.status_code == 202
+    assert replay.status_code == 401
+    text = caplog.text
+    assert "reason=bearer_rejected,signature_rejected" in text
+    assert "reason=timestamp_out_of_window" in text
+    assert "reason=missing_timestamp" in text
+    assert "reason=replay" in text
+    assert TOKEN not in text
+    assert HMAC_KEY not in text
+    assert bad_token not in text
+    assert bad_signature not in text
+    assert summary not in text
