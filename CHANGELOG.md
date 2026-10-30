@@ -21,7 +21,7 @@
 - README: `CUE_STATE_DB`가 있으면 접수·서명 재생·아웃박스는 SQLite이고, 비어 있으면 메모리입니다. 시도당 5초, 재시도는 최대 7회·60분입니다. `forwarded: true`는 Grok 2xx 기록 뒤입니다. 응답 표에 `forward_state`와 `503`을 넣었습니다.
 - `AI_SETUP`와 `SETUP`: 0.0.4 이전의 "재시도·outbox·영속 저장 없음", "`forwarded: true`는 add_task 예약", "메모리에만 기록"을 지웠습니다. 보내는 쪽 재전송 규칙을 현재 응답에 맞췄습니다. 2026-10-29 E2E 기록은 그대로 두고, 0.1.0 더미 실서버 확인 6/6과 Cue 실제 요청 1건(서명 버전 미확인)을 덧붙였습니다.
 - README, DESIGN, AI_SETUP, SETUP (KO/EN): 접수 로그와 접수 행의 `signature_version` `1` 또는 `2`. 환경 변수는 앱이 읽는 11개에 `CUE_STATE_DB`와 `CUE_OUTBOX_POLL_SECONDS`를 포함합니다.
-- `ABNORMAL_HANDLING.md`: 현행과 다른 S3·1.2·5.1 설명을 고치고, 구현된 P0–P3와 로그 행을 [구현]으로 표시했습니다. P8·P13의 배포 표시는 유지합니다. 아래 [미구현]은 코드가 없어 그대로 둡니다.
+- `ABNORMAL_HANDLING.md`: 현행과 다른 S3·1.2·5.1 설명을 고치고, 구현된 P0–P3와 로그 행을 [구현]으로 표시했습니다. P8·P13의 배포 표시는 유지합니다. 11-A에서 A8은 SQLite 재생 기록, A12는 outbox 워커 재전달, A13은 7회/60분 재시도 후 dead, A14·A15도 현재 코드로 고쳤습니다. 5.2 영속화와 7.1은 [구현]입니다. 알림·수동 재전달·상태 계약은 [미구현]으로 남습니다. 기준 버전은 0.1.1입니다.
 
 ## Unreleased
 
