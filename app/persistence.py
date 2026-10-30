@@ -13,6 +13,7 @@ import logging
 import os
 import sqlite3
 import threading
+from collections.abc import Callable
 
 from app.auth import REPLAY_TTL_SECONDS
 from app.forward import AttemptResult, GrokForwarder
@@ -337,13 +338,16 @@ class StateDB:
         forwarder: GrokForwarder,
         now: float,
         jitter: float | None = None,
+        *,
+        clock: Callable[[], float] | None = None,
     ) -> None:
         async with self._pump_lock:
             self.recover_sending()
             factor = jitter_factor() if jitter is None else jitter
             for job in self.claim_due(now):
                 result = await forwarder.attempt(job.payload)
-                self.finish(job, result, now, factor)
+                finished_at = now if clock is None else clock()
+                self.finish(job, result, finished_at, factor)
 
     def _insert_outbox(
         self,

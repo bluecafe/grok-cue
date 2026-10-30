@@ -2,7 +2,7 @@
 
 # grok-cue
 
-현재 버전: `0.0.4` ([VERSION](VERSION), [변경 기록](CHANGELOG.md))
+현재 버전: `0.0.5` ([VERSION](VERSION), [변경 기록](CHANGELOG.md))
 
 grok-cue는 두 AI 비서 서비스 사이에 놓이는 작은 "접수 창구" 서버입니다. 하나는 Manus가 만든 개인용 에이전트 앱 [Cue](https://cue.im/)이고, 다른 하나는 클라우드 컴퓨터에서 일하는 xAI의 에이전트 [Grok Bot](https://docs.x.ai/grok-bot/overview)입니다.
 두 비서는 끝낸 일을 서로에게 직접 넘겨줄 방법이 없습니다. grok-cue는 Cue 쪽이 서명해서 보낸 "작업 완료" 알림을 HTTP로 받고, 설정해 두었다면 Grok Bot 웹훅으로 접수한 내용을 JSON으로 넘깁니다.
@@ -78,7 +78,7 @@ curl http://127.0.0.1:8160/healthz   # → ok
 ### 서버
 
 [docs/SETUP.md](docs/SETUP.md)에 `/opt/grok-cue` 설치, systemd 유닛 `grok-cue.service`, 앞단 TLS 역방향 프록시(Caddy 등, 예시 호스트 `hook.example.com`) 설정이 있습니다.
-uvicorn은 `127.0.0.1`에만 묶어 둡니다.
+uvicorn은 `127.0.0.1`에만 묶어 둡니다. 프로세스는 하나만 띄웁니다. `uvicorn --workers`나 여러 서비스 인스턴스는 쓰지 않습니다. 아웃박스 워커는 그 프로세스 안에 하나뿐입니다.
 
 ### Cue 쪽 설정 (미검증)
 

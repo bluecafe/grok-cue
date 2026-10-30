@@ -139,6 +139,24 @@ sudo systemctl status grok-cue.service
 
 After changing settings, reload with `sudo systemctl restart grok-cue.service`.
 
+Run a single process only. Do not pass `uvicorn --workers`, and do not run more than one service instance. The outbox worker is one task inside that process.
+
+With `ProtectSystem=strict`, the database directory is read-only unless a drop-in allows it. For the example path `/var/lib/grok-cue`, save this drop-in as `/etc/systemd/system/grok-cue.service.d/state-db.conf`. This block is a documentation example too.
+
+```ini
+[Service]
+ProtectSystem=strict
+ReadWritePaths=/var/lib/grok-cue
+```
+
+```bash
+sudo mkdir -p /var/lib/grok-cue
+sudo chown bridge:bridge /var/lib/grok-cue
+sudo chmod 700 /var/lib/grok-cue
+```
+
+An example `CUE_STATE_DB` value is `/var/lib/grok-cue/state.sqlite`. If that directory is not writable, the server returns `503 storage_unavailable`.
+
 ## 3. HTTPS reverse proxy
 
 Example: Caddy receives `https://hook.example.com` and forwards to `127.0.0.1:8160`. Add this to the server's Caddyfile.

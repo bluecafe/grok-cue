@@ -2,7 +2,7 @@
 
 # grok-cue
 
-Current version: `0.0.4` ([VERSION](VERSION), [changelog](CHANGELOG.en.md))
+Current version: `0.0.5` ([VERSION](VERSION), [changelog](CHANGELOG.en.md))
 
 grok-cue is a small, signed "reception desk" between two AI assistant services:
 [Cue](https://cue.im/), the personal-agent app by Manus, and
@@ -84,7 +84,7 @@ Never commit `.env`.
 
 [docs/SETUP.en.md](docs/SETUP.en.md) covers installing to `/opt/grok-cue`, a `grok-cue.service` systemd
 unit, and putting a TLS reverse proxy such as Caddy in front (example host `hook.example.com`).
-Keep uvicorn bound to `127.0.0.1`.
+Keep uvicorn bound to `127.0.0.1`. Run a single process only. Do not use `uvicorn --workers` or more than one service instance. The outbox worker is one task inside that process.
 
 ### Cue-side setup (unverified)
 

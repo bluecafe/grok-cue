@@ -227,6 +227,8 @@ sudo systemctl status grok-cue.service
 
 성공 기준: `systemctl is-active grok-cue.service`가 `active`다.
 
+프로세스는 하나만 띄운다. `uvicorn --workers`를 붙이지 않고, 서비스 인스턴스도 하나다. `ProtectSystem=strict`이면 [SETUP.md](SETUP.md)의 `ReadWritePaths=/var/lib/grok-cue` 드롭인이 필요하다. DB 디렉터리를 쓸 수 없으면 서버는 `503 storage_unavailable`를 돌려준다.
+
 ### 3.5 HTTPS
 
 사용자 승인 후 Caddyfile에 다음을 넣는다. 호스트 이름은 사용자가 준 값이다.

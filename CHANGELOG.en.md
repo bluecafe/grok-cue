@@ -2,7 +2,7 @@
 
 # Changelog
 
-The current version is `0.0.4`. The value lives only in [`VERSION`](VERSION) at the repository root. The app does not read that file, and no response, including `/healthz`, includes the version.
+The current version is `0.0.5`. The value lives in [`VERSION`](VERSION) at the repository root. The app reads that file only for the FastAPI `version` field. No response body, including `/healthz`, includes the version.
 
 ## Version rules
 
@@ -25,6 +25,21 @@ Pre-1.0, and bumped in a SemVer-like way.
 - The 2026-10-29 E2E is one successful request record. Grok-side receipt was confirmed separately by Norn (user) at 16:05 KST.
 - In docs and READMEs the owner is 노른(사용자) in Korean and Norn (user) in English. There was no existing personal-name wording to replace.
 - Versioning was added only in `VERSION`, this changelog, and one README line. Application code was not changed, and no tag was created.
+
+## 0.0.5 — 2026-10-30
+
+PATCH. `0.1.0` is reserved for P8 and P13.
+
+### Features
+
+- The next retry time is computed from the clock immediately after the delivery attempt.
+- The FastAPI `version` field matches the root `VERSION` file. The `/healthz` body does not include the version.
+
+### Docs
+
+- The install docs show a `ReadWritePaths` drop-in for the database directory when `ProtectSystem=strict` is set. The example path is `/var/lib/grok-cue`. If that directory is not writable, the server returns `503 storage_unavailable`.
+- The README and `.env.example` say to run one process only, not to use `uvicorn --workers`, and that the outbox worker is the single worker inside that process.
+- The §12 P3 test list now includes the worker, restart-recovery, concurrent-pump, and post-attempt timestamp tests.
 
 ## 0.0.4 — 2026-10-30
 

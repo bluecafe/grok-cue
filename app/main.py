@@ -9,6 +9,7 @@ import time
 from collections.abc import Callable
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
+from pathlib import Path
 
 from fastapi import BackgroundTasks, FastAPI, Request
 from fastapi.responses import JSONResponse, Response
@@ -33,6 +34,17 @@ from app.settings import Settings
 from app.store import IdempotencyConflict, IdempotencyStore
 
 logger = logging.getLogger("grok_cue")
+
+
+def read_version() -> str:
+    """Version string for the FastAPI app. /healthz does not include it."""
+    path = Path(__file__).resolve().parent.parent / "VERSION"
+    try:
+        text = path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return "0.0.0"
+    return text or "0.0.0"
+
 
 MAX_BODY_BYTES = 64 * 1024
 _NO_STORE = {"Cache-Control": "no-store"}
@@ -159,7 +171,7 @@ def create_app(
         jitter=jitter or jitter_factor,
     )
     state.auto_pump = auto_pump
-    app = FastAPI(title="grok-cue", version="0.1.0", debug=False, lifespan=_outbox_lifespan)
+    app = FastAPI(title="grok-cue", version=read_version(), debug=False, lifespan=_outbox_lifespan)
     app.state.bridge = state
 
     @app.get("/healthz")
@@ -349,6 +361,7 @@ def create_app(
                     bridge.forwarder,
                     now,
                     bridge.jitter(),
+                    clock=bridge.clock,
                 )
         else:
             logger.info(
