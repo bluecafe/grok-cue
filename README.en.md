@@ -120,7 +120,7 @@ Every `POST /v1/cue/tasks` needs all of:
 - `X-Cue-Signature`: hex HMAC-SHA256. Hex is case-insensitive; a `sha256=` prefix is rejected.
 - No version header means v1. The input is `{timestamp}.{raw_body}`.
 - `X-Cue-Signature-Version: 2` means v2. The input is `v2`, METHOD, PATH, timestamp, and raw_body, joined by newlines. Example: METHOD `POST`, PATH `/v1/cue/tasks`.
-- Any other version value is `401`. v1 is not rejected yet.
+- Any other version value is `401`. v1 is not rejected yet. Rejecting v1 is a proposal for a later version and is not implemented.
 
 To retry, keep the exact body bytes and compute a new timestamp and signature.
 

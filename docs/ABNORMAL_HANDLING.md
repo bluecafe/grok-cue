@@ -154,7 +154,7 @@ v2 같은 비호환 변경은 아래 절차를 거칩니다.
 1. MINOR + **BREAKING** 버전 PR(12.1). v2는 0.1.0 [구현]
 2. 수용 기간: 헤더 없음 = v1, `X-Cue-Signature-Version: 2` = v2. 둘 다 받음 [구현]
 3. Cue 전환을 사용자(owner)가 확인 [미구현]
-4. v1 거절은 별도 PR, 다시 BREAKING 표기 [미구현]
+4. v1 거절은 별도 PR, 다시 BREAKING 표기 [미구현]. v1 종료는 제안이며 아직 구현하지 않습니다. 거절은 이후 버전에서 합니다.
 - 테스트: `test_v1_v2_overlap_window`, `test_unknown_signature_version_401` [구현]
 
 ## 6. 접수·전달 의미와 아웃박스 [구현]
@@ -351,7 +351,7 @@ stateDiagram-v2
 | `cancel_requested` 중 결과(T22) | 유지 | `after_cancel` | 1회 | **전달**, 표시 포함 [결정] |
 | `cancelled` 뒤 결과(T23) | 유지 | `after_cancel` | 1회 | **전달**, 표시 포함 [결정] |
 
-[결정, 2026-10-30, 미구현] 표시는 Grok으로 가는 전달에 붙입니다. 표시 칸은 8필드 밖이므로 0.1.0 계약에서 정의합니다. 0.1.0 전에는 `summary`를 바꾸지 않고 Bridge 로그·알림에만 남깁니다.
+[결정, 2026-10-30, 미구현] 표시는 Grok으로 가는 전달에 붙입니다. 표시 칸은 전달 10필드 밖이며, 0.1.0에서는 정의하지 않은 이후 버전 과제입니다. 그때까지 `summary`는 바꾸지 않고 Bridge 로그·알림에만 남깁니다.
 
 ### 9.6 재지시 규칙 [결정, 2026-10-30, 미구현]
 - `failed`(또는 다른 terminal) 뒤 재지시는 **새 handoff_id**를 발급합니다.
@@ -456,10 +456,10 @@ stateDiagram-v2
 5. Bridge 응답 `202`는 접수일 뿐입니다(1.2). 상태는 T03으로 `needs_input`이 되고, Grok 측 답변 메일(T09)로 이어집니다.
 
 - Cue 쓰기 범위는 브랜치·PR·Issue 댓글, 머지 금지 [결정]. 현재는 소유자 계정을 공유하므로 권한은 과하게 넓고, main 직접 push만 브랜치 보호로 막히며 머지 금지는 문서로만 지켜집니다(2.1). 권한이 없으면 3단계 없이 `needs_input`에 사유만 적습니다.
-- 아래는 Grok에 전달되는 8필드 모양입니다(요청 본문은 `schema_version`, `title`, `created_at` 등 13필드 스키마를 따름).
+- 아래는 요청 본문 15필드 스키마를 따른 예시입니다. Grok에 전달되는 필드는 10개(`handoff_id`, `attempt`, `report_seq`, `repo`, `github_ref`, `status`, `summary`, `links`, `next_owner`, `idempotency_key`)입니다.
 
 ```json
-{"handoff_id":"0f6c2d1e-0000-4000-8000-000000000001","repo":"bluecafe/grok-cue","github_ref":{"repo":"bluecafe/grok-cue","base_branch":"main","start_sha":"2483c3b8bdc9fde400498bba809f53147aa34095","issue_or_pr_number":2},"status":"needs_input","summary":"설계 문서 검토 결과 수정 요청을 Issue 댓글로 남김. Grok 확인 필요","links":["https://github.com/bluecafe/grok-cue/issues/2#issuecomment-1"],"next_owner":"grok","idempotency_key":"cue-0f6c2d1e-review-1"}
+{"schema_version":"1","handoff_id":"0f6c2d1e-0000-4000-8000-000000000001","attempt":1,"report_seq":1,"repo":"bluecafe/grok-cue","github_ref":{"repo":"bluecafe/grok-cue","base_branch":"main","start_sha":"2483c3b8bdc9fde400498bba809f53147aa34095","issue_or_pr_number":2},"idempotency_key":"cue-0f6c2d1e-review-1","title":"설계 문서 검토","status":"needs_input","summary":"설계 문서 검토 결과 수정 요청을 Issue 댓글로 남김. Grok 확인 필요","created_at":"2026-10-30T08:00:00Z","links":["https://github.com/bluecafe/grok-cue/issues/2#issuecomment-1"],"next_owner":"grok"}
 ```
 (번호·링크·키는 예시 값입니다.)
 

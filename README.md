@@ -114,7 +114,7 @@ Cue가 Bearer와 HMAC 서명 헤더를 붙인 POST를 직접 보낼 수 있는�
 - `X-Cue-Signature`: HMAC-SHA256 hex. hex 대소문자는 구분하지 않고, `sha256=` 접두사는 거절됩니다.
 - 버전 헤더가 없으면 v1입니다. 입력은 `{timestamp}.{raw_body}`입니다.
 - `X-Cue-Signature-Version: 2`이면 v2입니다. 입력은 `v2`, METHOD, PATH, timestamp, raw_body를 줄바꿈으로 이은 값입니다. 예: METHOD `POST`, PATH `/v1/cue/tasks`.
-- 그 밖의 버전 값은 `401`입니다. v1은 아직 거절하지 않습니다.
+- 그 밖의 버전 값은 `401`입니다. v1은 아직 거절하지 않습니다. v1 거절은 이후 버전의 제안이며 아직 구현하지 않습니다.
 
 다시 보낼 때는 본문 바이트를 그대로 두고 시각과 서명만 새로 계산합니다.
 
