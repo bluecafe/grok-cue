@@ -77,7 +77,7 @@ stat -c '%U:%G %a' /opt/grok-cue/.env          # bridge:bridge 600
 sudo -u bridge test -r /opt/grok-cue/.env && echo ok
 ```
 
-`bridge` is the example user from the systemd unit's `User=`/`Group=` below. If you use another user, change both places.
+`bridge` is the example user from the systemd unit's `User=`/`Group=` below. If you use another user, change the `.env` owner and the unit's `User=`/`Group=` together. This `chown` applies only to `.env`. Leave the install directory and `.venv` owned by the installing account (`"$USER"` above).
 
 ```bash
 pytest
@@ -93,7 +93,25 @@ uvicorn app.main:app --host 127.0.0.1 --port 8160
 
 The app reads `.env` from the working directory. Without the `cd` it cannot find the settings file.
 
-To keep it running after reboot, save this example systemd unit as `/etc/systemd/system/grok-cue.service`. The unit is a documentation example only; the repository does not ship a unit file. `bridge` is an example user; create it on the server and give it ownership of the install folder.
+To keep it running after reboot, save this example systemd unit as `/etc/systemd/system/grok-cue.service`. The unit is a documentation example only; the repository does not ship a unit file.
+
+The install-directory owner and the bridge service account are different accounts.
+
+- The install directory (`/opt/grok-cue`) is owned by the installing account from `sudo chown "$USER"` above. Leave the app code and `.venv` owned by that account.
+- `bridge` is the example name for the systemd `User=`/`Group=`. Do not give `bridge` ownership of the install directory. `bridge` must be able to read and execute the app code and the venv.
+- Only `.env` is owned by `bridge:bridge` with `chmod 600`.
+
+Run the following before starting the service. If a `test` fails, do not continue to `systemctl`.
+
+```bash
+sudo -u bridge test -r /opt/grok-cue/app/main.py && echo ok
+sudo -u bridge test -x /opt/grok-cue/.venv/bin/uvicorn && echo ok
+sudo -u bridge test -r /opt/grok-cue/.env && echo ok
+stat -c '%U:%G %a %n' /opt/grok-cue /opt/grok-cue/app/main.py /opt/grok-cue/.venv/bin/uvicorn /opt/grok-cue/.env
+ls -l /opt/grok-cue/.env /opt/grok-cue/.venv/bin/uvicorn
+```
+
+Success: each of the three `test` commands prints `ok`. In `stat`, the install directory, app code, and uvicorn are owned by the installing account, and `.env` is `bridge:bridge 600`. In `ls -l`, `.env` is `-rw-------` and owned by `bridge`.
 
 ```ini
 [Unit]
@@ -208,10 +226,18 @@ When retrying:
 
 If `reply_to` is omitted, `REPLY_TO_DEFAULT` is used and must be in `REPLY_TO_ALLOWLIST`. Field names and lengths follow [DESIGN.en.md](DESIGN.en.md). Never include a `task_id` key.
 
-### Cue-side setup (unverified)
+### Cue-side setup
 
 > [!NOTE]
-> **Unverified:** Cue's public site ([cue.im](https://cue.im/)) and app store listings do not document a way for a Cue agent to **automatically send an HTTP POST with Bearer and HMAC signature headers** to a user-chosen URL. What follows is not Cue's actual UI; it is the **generic requirement any sender must meet**.
+> **Verified on 2026-10-29:** the current Cue environment sent a real signed JSON POST and received HTTP `202` with `status`=`received`, `executed`=`false`, and `forwarded`=`true`. Downstream receipt was confirmed at 16:05 KST. This proves only a single request from the current Cue environment. It does not prove that every Cue chat task is sent automatically, and it does not prove install compatibility in other environments. `202` with `forwarded: true` means the request was received and forwarded. It does not mean the task is complete. What follows is not Cue's UI. It is the generic requirement any sender must meet.
+
+Cue-side flow:
+
+1. Receive the task email.
+2. Match `handoff_id` and the GitHub ref.
+3. Record Cue's work and outputs in the shared repository.
+4. Send the result link and status in one signed webhook request.
+5. Continue replies on the same `handoff_id`.
 
 The sender (a Cue agent, or another program Cue delegates to) must keep these three values secret:
 
@@ -228,7 +254,7 @@ For every request the sender must:
 3. Put the HMAC-SHA256 hex of `{timestamp}.{body bytes}` in `X-Cue-Signature`.
 4. POST with `Authorization` and `Content-Type: application/json`.
 
-[`scripts/check_bridge.py`](../scripts/check_bridge.py) is the **reference sender** that implements exactly these steps (section 6). If Cue cannot send such a request itself, it must be sent from another environment Cue can use, the same way the script does.
+[`scripts/check_bridge.py`](../scripts/check_bridge.py) is the **reference sender** that implements exactly these steps (section 6). The default is a dry run and sends nothing. A real send requires explicit `--send`. A test request can cause a real delivery to Grok Bot. The 2026-10-29 check is one request from the current Cue environment. Where Cue cannot send the request itself, send it the same way this script does.
 
 ### Notice Grok Bot receives
 
@@ -242,7 +268,7 @@ Only these 8 keys are sent ([DESIGN.en.md spec](DESIGN.en.md#spec)):
 
 `schema_version`, `title`, `created_at`, `reply_to`, `requested_by` are not included. This process never sends mail.
 
-`forwarded: true` in Cue's response means a forward was scheduled for this request, not that Grok Bot succeeded. It is `false` when the URL or key is missing, or for a replay of the same body. `executed` is always `false`.
+`202` with `forwarded: true` means the request was received and forwarded. It does not mean the task is complete, and it does not mean the Grok Bot routine succeeded. `forwarded` is `false` when the URL or key is missing, or for a replay of the same body. `executed` is always `false`.
 
 ## 6. Verifying
 
@@ -298,7 +324,7 @@ Use `--env PATH` if `.env` lives elsewhere. Resending the exact same timestamp a
 ## 8. Protecting keys
 
 - Keep `CUE_BRIDGE_TOKEN`, `CUE_BRIDGE_HMAC_KEY`, `GROK_WEBHOOK_KEY`, and rotation keys only in the server's `.env`.
-- `chmod 600` so only the owner can read it.
+- Own that file as `bridge:bridge` and `chmod 600`, so only that service account can read it. That owner is separate from the owner of the install directory and `.venv`.
 - Never paste values into the repository, chat, email, or issues. The `replace-with-` strings in `.env.example` are placeholders.
 - Logs never contain tokens, HMAC keys, the Grok key, signatures, bodies, or summaries.
 - To rotate, put new values in `CUE_BRIDGE_TOKEN_SECONDARY` and `CUE_BRIDGE_HMAC_KEY_SECONDARY` and restart. Both old and new values are accepted meanwhile. Each request still needs one accepted Bearer and one accepted HMAC key.
