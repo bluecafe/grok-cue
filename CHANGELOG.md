@@ -25,6 +25,10 @@
 
 ## Unreleased
 
+- 이 변경은 문서와 코드를 함께 고칩니다. `VERSION`은 `0.2.0`으로 유지합니다. `pyproject.toml`의 `version`과 `app/__init__.py`의 `__version__`을 `0.2.0`으로 맞췄고, 모듈 설명을 현재 앱(HMAC v2 접수, 기록, Grok 아웃박스 전달)에 맞게 고쳤습니다. `test_version_sync`는 `VERSION`, pyproject 버전, `__version__`, FastAPI 앱 버전이 같은지 확인합니다. 기여 문서에 버전을 올릴 때 `VERSION`, `pyproject.toml`, `app/__init__.py`, 한국어·영어 변경 기록을 함께 고치라고 적었습니다.
+- 2026-10-30 22:40 KST의 Cue 실제 요청 1건은 v2로 확인되었습니다(저널과 DB의 `signature_version=2`). handoff id와 idempotency key는 적지 않습니다.
+- 2026-10-30 23:00 KST의 0.2.0 배포 확인: v1과 버전 헤더가 없는 더미 요청은 둘 다 `401`(`unknown_signature_version`)이었고 아웃박스에는 쌓이지 않았습니다. v2 더미 요청은 `202`, `delivered`, `signature_version=2`였습니다. `healthz`는 `200`이었습니다. README, SETUP, AI_SETUP, DESIGN, ABNORMAL_HANDLING의 한국어와 영어에 적었습니다.
+- §12 P13의 Cue 실제 요청 검증은 [확인]입니다. `attempt` 1, `report_seq` 1인 실제 요청이 접수되었습니다.
 - 2.1 (b): push·PR은 [확인됨], 머지·설정 변경은 [목표 상태]/[현행 차이·위험]/[제안]. 12.1: 0.1.0 전 비호환 없는 단계는 0.0.x PATCH, 0.1.0은 P8·P13 전용.
 - 2.1절에서 저장소 소유자 계정이 기술적으로 할 수 있는 일과 Cue 연결 자격증명의 실제 권한을 구분했습니다. 확인되지 않은 자격증명 범위는 미검증으로 적었습니다. 검토 PR은 기록 문서로 두고 반영 PR을 먼저 머지하며, 머지와 반영 PR 댓글은 운영자(operator)가 하고 Cue 브랜치에는 커밋하지 않습니다. `needs_input` handoff는 기획(planner)이 초안한 회신을 사용자(owner)가 보내면 `completed`로 닫습니다.
 - 비정상 상황 처리 분석·설계안을 `docs/ABNORMAL_HANDLING.md`로 추가했습니다. 제안으로 적힌 항목은 구현되지 않았습니다.

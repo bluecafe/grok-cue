@@ -155,6 +155,7 @@ v2를 도입한 뒤의 전환은 아래와 같습니다.
 2. 0.1.x 수용 기간에는 헤더 없음 = v1, `X-Cue-Signature-Version: 2` = v2를 함께 받았습니다. 그 기간은 0.2.0에서 끝났습니다
 3. Cue가 v2로 보낸 것은 [확인]이다. 근거는 2026-10-30 22:40:43 KST의 Cue 실제 요청이다. handoff `20e64635`, `idempotency_key` `cue-20e64635-a1-r1`. 저널은 `signature_version=2`이고 DB `idempotency.signature_version`은 `2`이다. 아웃박스는 `delivered`, `attempts=1`이며 Grok은 `200`을 반환했다. 운영자(operator)가 읽기 전용으로 확인했다. Cue sending v2 is [confirmed]. Evidence is the same real Cue request at 2026-10-30 22:40:43 KST, handoff `20e64635`, idempotency_key `cue-20e64635-a1-r1`. The journal recorded `signature_version=2`, and `idempotency.signature_version` is `2`. The outbox row is `delivered` with `attempts=1`, and Grok returned `200`. The operator role checked this read-only.
 4. v1 거절 [구현] (0.2.0): 헤더가 없거나 값이 `1`이면 `401` `{"error":"unauthorized"}`. 응답 본문에 서명이나 비밀을 넣지 않습니다
+- 0.2.0 배포 확인 [확인] / [confirmed], 2026-10-30 23:00 KST: v1과 버전 헤더가 없는 더미 요청은 둘 다 `401`(`unknown_signature_version`)이었고 아웃박스에는 쌓이지 않았습니다. v2 더미 요청은 `202`, `delivered`, `signature_version=2`였습니다. `healthz`는 `200`이었습니다. Dummy requests with v1 and with no version header both returned `401` (`unknown_signature_version`) and nothing was queued in the outbox. A v2 dummy request returned `202`, was `delivered`, and stored `signature_version=2`. `healthz` returned `200`.
 - 테스트: `test_v1_header_is_401`, `test_missing_signature_version_is_401`, `test_v2_header_is_202`, `test_unknown_signature_version_401` [구현]
 
 ## 6. 접수·전달 의미와 아웃박스 [구현]
@@ -489,7 +490,7 @@ stateDiagram-v2
 | P10 | (결정 후) completed 검증(4.2) | 정상 / 링크 404 / SHA 없음 |
 | P11 | (결정 후) 취소 | `test_cancel_idempotent`, `test_result_after_cancel_recorded` |
 | P12 | 민감정보 검사, 422 거부 | 가짜 패턴 → 422, 로그 원문 없음 |
-| P13 | `attempt`/`report_seq`(10.1) [구현·배포] (0.1.0). 출처: 0.1.0 더미 실서버 확인 6/6 통과. Cue 실제 요청 검증은 [미확인] | `test_spec.py`·`test_forward_fields` 갱신, `test_sequence_conflict_409`, `test_older_generation_is_recorded_without_changing_state` |
+| P13 | `attempt`/`report_seq`(10.1) [구현·배포] (0.1.0). 출처: 0.1.0 더미 실서버 확인 6/6 통과. Cue 실제 요청 검증은 [확인] / [confirmed]: `attempt` 1, `report_seq` 1인 실제 요청이 접수되었다. A real request with attempt 1 and report_seq 1 was accepted. | `test_spec.py`·`test_forward_fields` 갱신, `test_sequence_conflict_409`, `test_older_generation_is_recorded_without_changing_state` |
 
 P3은 응답 의미를 바꾸므로(첫 202가 `forwarded:false`) Grok·Cue 공지가 함께 필요합니다.
 

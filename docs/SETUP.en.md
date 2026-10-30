@@ -252,7 +252,7 @@ If `reply_to` is omitted, `REPLY_TO_DEFAULT` is used and must be in `REPLY_TO_AL
 ### Cue-side setup
 
 > [!NOTE]
-> **Verified on 2026-10-29:** that environment sent a real signed JSON POST and received HTTP `202` with `status`=`received`, `executed`=`false`, and `forwarded`=`true`. Downstream receipt was confirmed by Norn (user) at 16:05 KST. That record is only that one request. The later 0.1.0 dummy live check passed 6/6. One real Cue request was accepted and forwarded, and that request's signature version is unconfirmed. Today `forwarded: true` only after a Grok 2xx is recorded. What follows is not Cue's UI. It is the generic requirement any sender must meet.
+> **Verified on 2026-10-29:** that environment sent a real signed JSON POST and received HTTP `202` with `status`=`received`, `executed`=`false`, and `forwarded`=`true`. Downstream receipt was confirmed by Norn (user) at 16:05 KST. That record is only that one request. The later 0.1.0 dummy live check passed 6/6. One real Cue request was accepted and forwarded. One real Cue request at 2026-10-30 22:40 KST was confirmed as v2 (journal and DB `signature_version=2`). After the 0.2.0 deployment at 2026-10-30 23:00 KST, dummy requests with v1 and with no version header both returned `401` (`unknown_signature_version`) and nothing was queued in the outbox. A v2 dummy request returned `202`, was `delivered`, and stored `signature_version=2`. `healthz` returned `200`. Today `forwarded: true` only after a Grok 2xx is recorded. What follows is not Cue's UI. It is the generic requirement any sender must meet.
 
 Cue-side flow:
 

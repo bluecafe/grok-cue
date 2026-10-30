@@ -45,6 +45,8 @@ When `CUE_STATE_DB` is set, acceptance, signature-replay, and outbox rows stay i
 Forwarding happens only when both `GROK_WEBHOOK_URL` and `GROK_WEBHOOK_KEY` are set, and only for the
 first acceptance of an idempotency key. The `202` is returned after that acceptance is committed. The first `202` has `forwarded: false`. `forwarded: true` only after that row records a Grok 2xx. A forwarding failure does not change the `202` already returned; the worker retries inside the limit.
 
+After the 0.2.0 deployment at 2026-10-30 23:00 KST, dummy requests with v1 and with no version header both returned `401` (`unknown_signature_version`) and nothing was queued in the outbox. A v2 dummy request returned `202`, was `delivered`, and stored `signature_version=2`. `healthz` returned `200`. One real Cue request at 2026-10-30 22:40 KST was confirmed as v2 (journal and DB `signature_version=2`).
+
 ## Install
 
 Have the following ready before installing; check each with the command shown.

@@ -25,6 +25,10 @@ Pre-1.0, and bumped in a SemVer-like way.
 
 ## Unreleased
 
+- This change updates docs and code together. `VERSION` stays `0.2.0`. `pyproject.toml` `version` and `app/__init__.py` `__version__` are now `0.2.0`, and the module docstring describes the current app (HMAC v2 acceptance, recording, and Grok outbox forwarding). `test_version_sync` checks that `VERSION`, the pyproject version, `__version__`, and the FastAPI app version are equal. The contributing docs say that a version bump updates `VERSION`, `pyproject.toml`, `app/__init__.py`, and both changelogs together.
+- One real Cue request at 2026-10-30 22:40 KST was confirmed as v2 (journal and DB `signature_version=2`). The handoff id and idempotency key are omitted.
+- 0.2.0 deployment check at 2026-10-30 23:00 KST: dummy requests with v1 and with no version header both returned `401` (`unknown_signature_version`) and nothing was queued in the outbox. A v2 dummy request returned `202`, was `delivered`, and stored `signature_version=2`. `healthz` returned `200`. Recorded in the Korean and English README, SETUP, AI_SETUP, DESIGN, and ABNORMAL_HANDLING.
+- Section 12 P13 Cue real-request verification is confirmed. A real request with attempt 1 and report_seq 1 was accepted.
 - Section 2.1 (b): push and pull requests are confirmed; merge and settings changes are target, current gap, and proposal. Section 12.1: non-breaking steps before 0.1.0 are 0.0.x PATCH; 0.1.0 is only for P8 and P13.
 - Section 2.1 separates what the repository owner account can technically do from the actual scope of the credential Cue uses. Unverified credential scopes are marked unverified. An external review PR is a record: merge the incorporation PR first, then the operator merges the review PR and comments with that link, and nobody on our side commits to the Cue branch. A `needs_input` handoff is closed as `completed` when the owner sends the reply email drafted by the planner.
 - Added the abnormal-handling analysis and design document at `docs/ABNORMAL_HANDLING.md`. Items written as proposals are not implemented.
