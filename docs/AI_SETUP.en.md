@@ -47,7 +47,19 @@ Grok Bot sends the task email and, when configured, receives the accepted JSON f
 
 ### Cue
 
-Cue reads the task email and the issue or PR, and after finishing sends `POST /v1/cue/tasks`. **Unverified:** public docs do not confirm that Cue can send a POST with signature headers itself. The generic sender requirement is in [SETUP.en.md](SETUP.en.md), 'Cue-side setup (unverified)'; the reference sender is `scripts/check_bridge.py`.
+Cue-side flow:
+
+1. Receive the task email.
+2. Match `handoff_id` and the GitHub ref.
+3. Record Cue's work and outputs in the shared repository.
+4. Send the result link and status in one signed webhook request (`POST /v1/cue/tasks`).
+5. Continue replies on the same `handoff_id`.
+
+On 2026-10-29 the current Cue environment sent a real signed JSON POST and received HTTP `202` with `status`=`received`, `executed`=`false`, and `forwarded`=`true`. Downstream receipt was confirmed at 16:05 KST. This proves only a single request from the current Cue environment. It does not prove that every Cue chat task is sent automatically, and it does not prove install compatibility in other environments.
+
+`202` with `forwarded: true` means the request was received and forwarded. It does not mean the task is complete.
+
+The generic sender requirement is in [SETUP.en.md](SETUP.en.md), 'Cue-side setup'. The reference sender is `scripts/check_bridge.py`. Its default is a dry run. A real send requires explicit `--send`. A test request can cause a real Grok delivery.
 
 Signing:
 
@@ -95,7 +107,7 @@ Get the user's approval before any of the following. Do not proceed without an e
 - Merging
 - Paying
 
-`202` with `executed: false` is acceptance only, not approval to merge, deploy, or pay.
+`202` with `executed: false` is acceptance. Together with `forwarded: true` it means received and forwarded. It is not task completion, and it is not approval to merge, deploy, or pay.
 
 Prohibited:
 
@@ -203,7 +215,7 @@ Success: pytest finishes without failures. The following returns `200` with body
 curl -sS -D - http://127.0.0.1:8160/healthz
 ```
 
-To keep it running, after approval place the example unit from [SETUP.en.md](SETUP.en.md) at `/etc/systemd/system/grok-cue.service`. That block is a documentation example; do not add a unit file to the repository.
+To keep it running, after approval place the example unit from [SETUP.en.md](SETUP.en.md) at `/etc/systemd/system/grok-cue.service`. That block is a documentation example; do not add a unit file to the repository. Before starting the service, pass the ownership checks in that guide. The install directory and `.venv` stay owned by the installing account. Only `.env` is `bridge:bridge` with `chmod 600`. `bridge` must be able to read and execute the app code and the venv. The checks are `sudo -u bridge test -r`, `sudo -u bridge test -x`, `stat`, and `ls -l`.
 
 ```bash
 sudo systemctl daemon-reload
@@ -259,7 +271,7 @@ Success criteria:
 | Same body, new timestamp and HMAC | `202` | Same `handoff_id`, `forwarded`=`false` |
 | Same `idempotency_key`, different body | `409` | `{"error":"idempotency_conflict"}` |
 
-The first `202` has `forwarded: true` only when both `GROK_WEBHOOK_URL` and `GROK_WEBHOOK_KEY` are set. With only one, `forwarded` is `false`. `forwarded: true` means scheduled, not that the Grok Bot routine succeeded.
+The first `202` has `forwarded: true` only when both `GROK_WEBHOOK_URL` and `GROK_WEBHOOK_KEY` are set. With only one, `forwarded` is `false`. `202` with `forwarded: true` means the request was received and forwarded. It does not mean the task is complete, and it does not mean the Grok Bot routine succeeded.
 
 Resending the exact same signature returns `401`; do not treat that as a `202` replay.
 

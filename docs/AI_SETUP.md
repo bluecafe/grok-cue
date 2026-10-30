@@ -47,7 +47,19 @@ Grok은 작업 메일을 보내고, 설정이 있으면 grok-cue가 넘긴 접�
 
 ### Cue
 
-Cue는 작업 메일과 Issue 또는 PR을 읽고, 끝난 뒤 `POST /v1/cue/tasks`를 보낸다. **미검증:** Cue가 서명 헤더를 붙인 POST를 직접 보낼 수 있는지는 공개 문서로 확인되지 않았다. 보내는 쪽의 일반 요구 사항은 [SETUP.md](SETUP.md)의 'Cue 쪽 설정 (미검증)'이고, 참고 송신기는 `scripts/check_bridge.py`다.
+Cue 쪽 흐름:
+
+1. 작업 메일을 받는다.
+2. `handoff_id`와 GitHub ref를 맞춘다.
+3. Cue의 작업과 산출물을 공유 저장소에 남긴다.
+4. 결과 링크와 상태를 서명된 웹훅 요청 한 번으로 보낸다 (`POST /v1/cue/tasks`).
+5. 같은 `handoff_id`로 답장을 이어 간다.
+
+2026-10-29에 현재 Cue 환경이 서명된 JSON POST를 실제로 보냈고, HTTP `202`와 `status`=`received`, `executed`=`false`, `forwarded`=`true`를 받았다. 하류 수신은 16:05 KST에 확인되었다. 이 결과는 현재 Cue 환경의 요청 한 건만을 증명한다. Cue 채팅의 모든 작업이 자동으로 보내진다는 뜻이 아니고, 다른 환경의 설치 호환도 증명하지 않는다.
+
+`202`와 `forwarded: true`는 그 요청이 접수되고 전달되었다는 뜻이다. 작업 완료가 아니다.
+
+보내는 쪽의 일반 요구 사항은 [SETUP.md](SETUP.md)의 'Cue 쪽 설정'이고, 참고 송신기는 `scripts/check_bridge.py`다. 그 스크립트의 기본은 dry-run이다. 실제 전송은 `--send`를 붙일 때만 한다. 시험 요청은 Grok으로의 실제 전달을 일으킬 수 있다.
 
 서명:
 
@@ -95,7 +107,7 @@ Cue는 작업 메일과 Issue 또는 PR을 읽고, 끝난 뒤 `POST /v1/cue/task
 - 머지
 - 결제
 
-`202`와 `executed: false`는 접수다. 머지, 배포, 결제 승인이 아니다.
+`202`와 `executed: false`는 접수다. `forwarded: true`가 함께 있으면 접수되고 전달된 것이다. 작업 완료가 아니고, 머지, 배포, 결제 승인이 아니다.
 
 금지:
 
@@ -203,7 +215,7 @@ uvicorn app.main:app --host 127.0.0.1 --port 8160
 curl -sS -D - http://127.0.0.1:8160/healthz
 ```
 
-계속 켜 두려면 사용자 승인 후 [SETUP.md](SETUP.md)의 systemd 예시 유닛을 `/etc/systemd/system/grok-cue.service`에 둔다. 그 블록은 문서 예시이며 저장소에 유닛 파일을 추가하지 않는다.
+계속 켜 두려면 사용자 승인 후 [SETUP.md](SETUP.md)의 systemd 예시 유닛을 `/etc/systemd/system/grok-cue.service`에 둔다. 그 블록은 문서 예시이며 저장소에 유닛 파일을 추가하지 않는다. 서비스를 켜기 전에 같은 문서의 소유자 확인을 통과시킨다. 설치 디렉터리와 `.venv`의 소유자는 설치 계정이고, `.env`만 `bridge:bridge`와 `chmod 600`이다. `bridge`는 앱 코드와 `.venv`를 읽고 실행할 수 있어야 한다. 확인 명령은 `sudo -u bridge test -r`, `sudo -u bridge test -x`, `stat`, `ls -l`이다.
 
 ```bash
 sudo systemctl daemon-reload
@@ -259,7 +271,7 @@ sudo -u bridge .venv/bin/python scripts/check_bridge.py --send     # 전달을 �
 | 같은 본문, 새 시각과 새 HMAC | `202` | 같은 `handoff_id`, `forwarded`=`false` |
 | 같은 `idempotency_key`, 다른 본문 | `409` | `{"error":"idempotency_conflict"}` |
 
-`GROK_WEBHOOK_URL`과 `GROK_WEBHOOK_KEY`가 둘 다 있을 때만 첫 `202`의 `forwarded`가 `true`다. URL만 있거나 키만 있으면 `forwarded`는 `false`다. `forwarded: true`는 전달을 예약한 것이고, Grok 루틴의 성공이 아니다.
+`GROK_WEBHOOK_URL`과 `GROK_WEBHOOK_KEY`가 둘 다 있을 때만 첫 `202`의 `forwarded`가 `true`다. URL만 있거나 키만 있으면 `forwarded`는 `false`다. `202`와 `forwarded: true`는 접수되고 전달되었다는 뜻이다. 작업 완료가 아니고, Grok 루틴의 성공도 아니다.
 
 같은 서명을 그대로 다시 보내면 `401`이다. 그 결과를 `202` 재전송으로 보지 않는다.
 

@@ -77,7 +77,7 @@ stat -c '%U:%G %a' /opt/grok-cue/.env          # bridge:bridge 600
 sudo -u bridge test -r /opt/grok-cue/.env && echo ok
 ```
 
-`bridge`는 아래 systemd 유닛의 `User=`/`Group=`과 같은 예시 사용자입니다. 다른 사용자를 쓰면 두 곳을 함께 바꿉니다.
+`bridge`는 아래 systemd 유닛의 `User=`/`Group=`과 같은 예시 사용자입니다. 다른 사용자를 쓰면 `.env` 소유와 유닛의 `User=`/`Group=`을 함께 바꿉니다. 이 `chown`은 `.env`에만 적용합니다. 설치 디렉터리와 `.venv`의 소유자는 위의 `"$USER"` 설치 계정으로 둡니다.
 
 ```bash
 pytest
@@ -93,7 +93,25 @@ uvicorn app.main:app --host 127.0.0.1 --port 8160
 
 앱은 작업 폴더의 `.env`를 읽습니다. `cd`를 빼면 설정 파일을 찾지 못합니다.
 
-부팅 후에도 켜 두고 싶으면 systemd 유닛 예시를 `/etc/systemd/system/grok-cue.service`에 저장할 수 있습니다. 이 블록은 문서 안의 예시이며, 저장소에는 유닛 파일을 넣지 않습니다. `bridge` 사용자는 예시 이름입니다. 서버에 그 사용자를 만든 뒤 설치 폴더 소유로 맞춥니다.
+부팅 후에도 켜 두고 싶으면 systemd 유닛 예시를 `/etc/systemd/system/grok-cue.service`에 저장할 수 있습니다. 이 블록은 문서 안의 예시이며, 저장소에는 유닛 파일을 넣지 않습니다.
+
+설치 디렉터리의 소유자와 브리지 서비스 계정은 다릅니다.
+
+- 설치 디렉터리(`/opt/grok-cue`)의 소유자는 위에서 `sudo chown "$USER"`로 맞춘 설치 계정입니다. 앱 코드와 `.venv`도 그 계정 소유로 둡니다.
+- `bridge`는 systemd `User=`/`Group=`의 예시 이름입니다. 설치 디렉터리를 `bridge` 소유로 바꾸지 않습니다. `bridge`는 앱 코드와 `.venv`를 읽고 실행할 수 있어야 합니다.
+- `.env`만 소유자가 `bridge:bridge`이고 `chmod 600`입니다.
+
+서비스를 시작하기 전에 아래를 실행합니다. `test`가 실패하면 `systemctl`로 가지 않습니다.
+
+```bash
+sudo -u bridge test -r /opt/grok-cue/app/main.py && echo ok
+sudo -u bridge test -x /opt/grok-cue/.venv/bin/uvicorn && echo ok
+sudo -u bridge test -r /opt/grok-cue/.env && echo ok
+stat -c '%U:%G %a %n' /opt/grok-cue /opt/grok-cue/app/main.py /opt/grok-cue/.venv/bin/uvicorn /opt/grok-cue/.env
+ls -l /opt/grok-cue/.env /opt/grok-cue/.venv/bin/uvicorn
+```
+
+성공 기준: 세 `test`가 각각 `ok`를 출력합니다. `stat`에서 설치 디렉터리, 앱 코드, uvicorn은 설치 계정 소유이고 `.env`는 `bridge:bridge 600`입니다. `ls -l`에서 `.env`는 `-rw-------`이고 소유자는 `bridge`입니다.
 
 ```ini
 [Unit]
@@ -208,10 +226,18 @@ Cue는 `POST https://hook.example.com/v1/cue/tasks`로 JSON을 보냅니다. 로
 
 `reply_to`를 생략하면 `REPLY_TO_DEFAULT`를 씁니다. 그 주소는 `REPLY_TO_ALLOWLIST`에 있어야 합니다. 본문 필드의 이름과 길이는 [DESIGN.md](DESIGN.md)와 같습니다. `task_id` 키는 넣지 않습니다.
 
-### Cue 쪽 설정 (미검증)
+### Cue 쪽 설정
 
 > [!NOTE]
-> **미검증 (unverified):** Cue 공개 사이트([cue.im](https://cue.im/))와 앱 스토어 설명에서는 Cue 에이전트가 사용자가 정한 주소로 **Bearer와 HMAC 서명 헤더를 붙인 HTTP POST를 자동으로 보내는 기능**을 확인하지 못했습니다. 아래는 Cue의 실제 화면이나 메뉴가 아니라, **누가 보내든 지켜야 하는 일반 요구 사항**입니다.
+> **2026-10-29 확인:** 현재 Cue 환경이 서명된 JSON POST를 실제로 보냈고, HTTP `202`와 `status`=`received`, `executed`=`false`, `forwarded`=`true`를 받았습니다. 하류 수신은 16:05 KST에 확인되었습니다. 이 결과는 현재 Cue 환경의 요청 한 건만을 증명합니다. Cue 채팅의 모든 작업이 자동으로 보내진다는 뜻이 아니고, 다른 환경의 설치 호환도 증명하지 않습니다. `202`와 `forwarded: true`는 접수되고 전달되었다는 뜻입니다. 작업 완료가 아닙니다. 아래는 Cue의 화면이나 메뉴가 아니라, 보내는 쪽이 지켜야 하는 일반 요구 사항입니다.
+
+Cue 쪽 흐름:
+
+1. 작업 메일을 받습니다.
+2. `handoff_id`와 GitHub ref를 맞춥니다.
+3. Cue의 작업과 산출물을 공유 저장소에 남깁니다.
+4. 결과 링크와 상태를 서명된 웹훅 요청 한 번으로 보냅니다.
+5. 같은 `handoff_id`로 답장을 이어 갑니다.
 
 보내는 쪽(Cue 에이전트, 또는 Cue가 작업을 맡긴 다른 프로그램)은 다음 세 값을 비밀로 보관해야 합니다.
 
@@ -228,7 +254,7 @@ Cue는 `POST https://hook.example.com/v1/cue/tasks`로 JSON을 보냅니다. 로
 3. `{timestamp}.{본문 바이트}`의 HMAC-SHA256 hex를 `X-Cue-Signature`에 넣습니다.
 4. `Authorization`, `Content-Type: application/json`과 함께 POST합니다.
 
-이 순서를 그대로 구현한 **참고용 송신기**가 [`scripts/check_bridge.py`](../scripts/check_bridge.py)입니다(6절). Cue가 이런 요청을 직접 보낼 수 없다면, Cue가 사용할 수 있는 다른 실행 환경에서 이 스크립트와 같은 방식으로 보내야 합니다.
+이 순서를 그대로 구현한 **참고용 송신기**가 [`scripts/check_bridge.py`](../scripts/check_bridge.py)입니다(6절). 기본은 dry-run이라 아무것도 보내지 않습니다. 실제로 보내려면 `--send`가 필요합니다. 시험 요청은 Grok Bot에 실제 전달을 일으킬 수 있습니다. 2026-10-29 확인은 현재 Cue 환경의 한 건입니다. 다른 환경에서 Cue가 이 요청을 직접 보내지 못하면, 이 스크립트와 같은 방식으로 보냅니다.
 
 ### Grok이 받을 알림
 
@@ -242,7 +268,7 @@ Grok 루틴은 그 주소에서 POST를 받습니다. `GROK_WEBHOOK_KEY_HEADER`�
 
 `schema_version`, `title`, `created_at`, `reply_to`, `requested_by`는 포함되지 않습니다. 메일은 이 프로세스가 보내지 않습니다.
 
-Cue 응답의 `forwarded`가 `true`이면 이 요청에서 전달을 예약한 것입니다. Grok이 성공했다는 뜻은 아닙니다. URL이나 키가 없거나, 같은 본문을 다시 받은 경우에는 `forwarded`가 `false`입니다. `executed`는 항상 `false`입니다.
+`202`와 `forwarded: true`는 그 요청이 접수되고 전달되었다는 뜻입니다. 작업 완료가 아니고, Grok 루틴이 성공했다는 뜻도 아닙니다. URL이나 키가 없거나, 같은 본문을 다시 받은 경우에는 `forwarded`가 `false`입니다. `executed`는 항상 `false`입니다.
 
 ## 6. 동작 확인
 
@@ -298,7 +324,7 @@ sudo -u bridge .venv/bin/python scripts/check_bridge.py --send     # 전달을 �
 ## 8. 키를 지키는 법
 
 - `CUE_BRIDGE_TOKEN`, `CUE_BRIDGE_HMAC_KEY`, `GROK_WEBHOOK_KEY`와 교체용 키는 서버의 `.env`에만 둡니다.
-- 그 파일은 `chmod 600`으로 소유자만 읽게 합니다.
+- 그 파일의 소유자는 `bridge:bridge`이고, `chmod 600`으로 그 서비스 계정만 읽게 합니다. 설치 디렉터리와 `.venv`의 소유자와는 다릅니다.
 - 저장소, 채팅, 메일, Issue에 값을 붙이지 않습니다. `.env.example`의 `replace-with-` 문자열은 자리표시자입니다.
 - 로그에는 토큰, HMAC 키, Grok 키, 서명, 본문, 요약을 남기지 않습니다.
 - 키를 바꿀 때는 새 값을 `CUE_BRIDGE_TOKEN_SECONDARY`와 `CUE_BRIDGE_HMAC_KEY_SECONDARY`에 넣고 프로세스를 다시 시작합니다. 그 동안에는 이전 값과 새 값 모두 받습니다. 한 요청에는 받은 Bearer 중 하나와 받은 HMAC 키 중 하나가 모두 맞아야 합니다.
