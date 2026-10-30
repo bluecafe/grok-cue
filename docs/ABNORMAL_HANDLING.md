@@ -1,6 +1,6 @@
 한국어
 
-# grok-cue 비정상 상황 처리 분석·설계안 (v5, 검토 의견 8개 반영)
+# grok-cue 비정상 상황 처리 분석·설계안 (v5, 검토 의견 8개 + 노른(사용자) 결정 10개 반영)
 
 - 대상: `bluecafe/grok-cue` main `2483c3b` (0.0.1). 읽기 전용으로 `app/forward.py`, `app/main.py`, `app/auth.py`, `app/store.py`를 다시 읽어 확인했습니다.
 - 범위: 문서만. 코드·테스트·Bridge 수신기·메일 루틴·인프라·시크릿·배포는 건드리지 않습니다.
@@ -48,13 +48,15 @@ Cue는 새 작업 메일을 받으면 ① 명세와 GitHub 참조를 확인하�
 인계·`202`·`forwarded`·`completed`는 머지·배포·결제 승인이 아닙니다 [결정]. 응답은 항상 `executed: false`입니다 [현행 구현] (`main.py`, `test_successful_forward_is_scheduled_and_not_execution`).
 
 ### 2.1 GitHub 계정·권한 현실 [노른(사용자) 확인 사실 + 위험]
-- 노른(사용자) 확인(2026-10-30): Cue는 지금 **저장소 소유자와 같은 GitHub 계정**을 씁니다. 따라서 Cue는 소유자 권한(설정 변경, PR 생성·머지 등)을 가집니다. main 직접 push는 아래 보호로 거절됩니다 [현행].
-- **위험**: 2절의 역할 경계는 문서 약속으로만 지켜지고, 기술적으로 전부 강제되지는 않습니다. main 직접 push·force push·브랜치 삭제는 아래 보호가 막습니다 [현행]. 같은 계정이므로 PR을 만들고 머지하는 것은 기술적으로 가능하고, 그 제한은 문서에 적힌 규칙으로만 통제됩니다.
+- 노른(사용자) 확인(2026-10-30): Cue는 지금 **저장소 소유자와 같은 GitHub 계정**을 씁니다. 따라서 Cue는 소유자 권한(main 직접 push, 설정 변경, 머지 등)을 가집니다.
+- **위험**: 2절의 역할 경계는 문서 약속으로만 지켜지고, 기술적으로 강제되지 않습니다. 실수나 잘못된 지시로 main 변경·머지가 일어나도 막는 장치가 없습니다.
 - 공개 저장소 권한 참고:
   - 누구나 읽기, Issue 열기, fork 후 PR을 만들 수 있습니다. 외부 PR은 쓰기 권한이 없으면 머지할 수 없습니다.
   - Triage 역할: Issue·PR 라벨·닫기 등 관리만, 코드 push 불가. Write 역할: 브랜치 push와 (보호 규칙이 없으면) main push·머지 가능.
-  - main 브랜치 보호 [현행]: 이미 적용되어 있습니다. `enforce_admins=true`, PR 필수, 승인 0개 필수, force push 금지, 삭제 금지. Actions가 꺼져 있으므로 필수 status check는 없습니다. 2026-10-30 17:27 KST에 `gh api`로 확인했습니다. 앱 코드의 [현행 구현]이 아니라 GitHub 저장소 설정입니다.
-- 별도 계정·토큰은 [제안·미구현]입니다. 그 설정이 되어 있다고 확인된 것은 없으며, GitHub에서 확인하기 전까지 [미검증 전제]로 봅니다.
+  - main 브랜치 보호(제안): PR 필수, 직접 push 금지, 관리자에게도 적용(include administrators). Actions가 꺼져 있으므로 필수 status check는 두지 않습니다.
+- **main 브랜치 보호는 적용돼 있습니다** [현행 설정, 2026-10-30 17:27 KST `gh api`로 확인]: `enforce_admins=true`, PR 필수, 필수 승인 0, status check 없음, force push·삭제 금지. 그래서 같은 계정이어도 main 직접 push는 막힙니다. 단 PR을 만들어 머지하는 것은 계정상 가능합니다.
+- [결정, 2026-10-30] Cue 쓰기 범위 = 브랜치·PR·Issue 댓글. **머지 금지**(문서 규칙으로만 강제).
+- [결정, 2026-10-30] 당분간 같은 GitHub 계정 유지. 위험(머지·설정 변경을 기술적으로 막지 못함)은 남아 있습니다. 전용 계정·fine-grained 토큰은 [제안·미구현].
 
 ## 3. 현행 정상 사이클 [현행 구현]
 | 단계 | 내용 | 위치 |
@@ -113,17 +115,17 @@ Cue는 새 작업 메일을 받으면 ① 명세와 GitHub 참조를 확인하�
 
 **현행 계약은 v1뿐입니다.**
 
-### 5.2 개선 제안 [제안·미구현, 결정 대기]
+### 5.2 개선 제안 [제안·미구현, 일부 결정]
 | 항목 | 제안 | 상태 | 테스트(제안) |
 |---|---|---|---|
-| 메서드·경로 결합 | v2: `"v2\n"+METHOD+"\n"+PATH+"\n"+ts+"\n"+raw_body`, 헤더 `X-Cue-Signature-Version: 2`. 권장: 서명 엔드포인트를 추가할 때 함께 도입 | 결정 대기, Cue 지원은 미검증 전제 | `test_v2_signature_binds_method_and_path` |
+| 메서드·경로 결합 | v2: `"v2\n"+METHOD+"\n"+PATH+"\n"+ts+"\n"+raw_body`, 헤더 `X-Cue-Signature-Version: 2`. **0.1.0에 순번 필드와 함께**, v1/v2 동시 수용 전환(5.3) | [결정, 2026-10-30] 미구현. Cue 지원은 미검증 전제 | `test_v2_signature_binds_method_and_path` |
 | 재생 기록 영속화 | SQLite `replay(sig_sha256 PK, ts)`, 접수와 같은 트랜잭션, DB 오류면 503(fail closed) | 결정 대기 | `test_replay_rejected_after_restart`, `test_replay_store_unavailable_fails_closed` |
-| 키 교체 시점 | 보조에 새 키 → Cue 전환 확인 → 기본 교체 → 보조 비움. 주기는 결정 대기. 값은 OCI env 파일에만 | 슬롯은 현행, 절차·주기는 결정 대기 | `test_removed_key_is_rejected`, `test_log_shows_key_slot_not_key` |
+| 키 교체 시점 | 보조에 새 키 → Cue 전환 확인 → 기본 교체 → 보조 비움. **90일마다, 유출 의심 시 즉시**. 값은 OCI env 파일에만 | 슬롯은 현행, 주기는 [결정, 2026-10-30], 절차는 미구현 | `test_removed_key_is_rejected`, `test_log_shows_key_slot_not_key` |
 | 로그 금지 확장 | 인증 실패 사유만 기록, 비밀·서명·summary 없음 | 제안 | `test_auth_reason_log_has_no_secret` |
 
 ### 5.3 v1과 호환되지 않는 변경의 전환 절차 [제안·미구현]
 v2 같은 비호환 변경은 아래 절차를 거치기 전에는 현행 계약으로 쓰지 않습니다.
-1. MINOR + **BREAKING** 버전 PR(12.1)
+1. MINOR + **BREAKING** 버전 PR(12.1). v2는 0.1.0 [결정]
 2. 수용 기간: 헤더 없음 = v1, `X-Cue-Signature-Version: 2` = v2. 둘 다 받음
 3. Cue 전환을 노른(사용자)이 확인
 4. v1 거절은 별도 PR, 다시 BREAKING 표기
@@ -170,10 +172,10 @@ v2 같은 비호환 변경은 아래 절차를 거치기 전에는 현행 계약
 {"handoff_id":"0f6c2d1e-0000-4000-8000-000000000001","status":"received","executed":false,"forwarded":true,"forward_state":"delivered"}
 ```
 
-## 7. 재시도 정책 [제안·미구현, 수치는 결정 대기]
+## 7. 재시도 정책 [제안·미구현, 수치는 결정(2026-10-30)]
 
 ### 7.1 Bridge → Grok
-- 시도 횟수: **첫 시도를 포함해 최대 7회**(첫 시도 + 재시도 6회)
+- 시도 횟수: **첫 시도를 포함해 최대 7회**(첫 시도 + 재시도 6회), 총 60분 [결정]
 - 기본 백오프: 시도 사이 1, 2, 4, 8, 15, 30분(누적 60분). 지터는 0~−20%만 써서 한도를 넘지 않게 함
 - `Retry-After`: 값이 있고 유효하면 **백오프보다 우선**. 단 30분 상한, 그리고 60분 한도 안에서만
 - **60분 한도**: 첫 시도 시작 시각부터 잽니다. 다음 시도 시작이 한도를 넘으면 시도하지 않고 `dead`
@@ -187,27 +189,26 @@ v2 같은 비호환 변경은 아래 절차를 거치기 전에는 현행 계약
 - 기존 시도 이력은 지우지 않습니다. 새 `run`(1부터 증가)을 만들고 그 run 안에서 다시 최대 7회·60분을 셉니다.
 - 이력 행: `(idempotency_key, run, try_no, started_at, outcome, http_status)`. 추가만 하고 수정하지 않습니다.
 
-### 7.3 Cue → Bridge [미검증 전제, 수치 결정 대기]
+### 7.3 Cue → Bridge [미검증 전제, Cue 측 수치는 Cue 확인 대기]
 - 같은 바디 바이트·같은 키로만, 매번 새 타임스탬프로 재서명
 - 제안: 첫 시도 포함 최대 3회, 간격 1분·5분. 대상은 연결 오류·타임아웃·5xx(503 포함). 400·401·409는 재시도하지 않음
 - 그래도 실패하면 "전달됐다"고 말하지 않고 노른(사용자)께 알림. 다른 경로로 우회하지 않음 [결정]
 
 ## 8. 최종 전달 실패 시 운영 대응
 
-### 8.1 알림 경로 — **미해결**
-검증된 별도 경로가 없으므로 선택 전까지 미해결입니다. 후보 [제안·미구현]:
-- (a) systemd journal 경고 + `scripts/outbox_status.py`
-- (b) 두 번째 알림 웹훅(값은 OCI env에만)
-- (c) 운영 메일(Bridge에 메일 기능이 없어 새 기능)
+### 8.1 알림 경로 — **노른(사용자) 이메일** [결정, 2026-10-30, 미구현]
+- 최종 전달 실패 알림은 노른(사용자)의 이메일로 보냅니다. 실제 주소는 문서에 쓰지 않고 OCI env 파일에만 둡니다.
+- Bridge에는 메일 발송 기능이 없으므로 새 기능입니다(P5). 발송 수단(SMTP 등)은 커서 설계 대기.
+- 보조: systemd journal 경고 + `scripts/outbox_status.py` [제안·미구현]
 
 | 항목 | 내용 [제안·미구현] |
 |---|---|
-| 담당자 | 경로 선택: 노른(사용자). 알림 수신·복구 실행 담당: 결정 대기 |
+| 담당자 | 수신: 노른(사용자) [결정]. 복구 실행(`redeliver.py`) 담당: 결정 대기 |
 | 발동 기준 | 행이 `dead`가 될 때 1회. 인증 실패 연속 5회 |
 | 알림 내용 | `handoff_id`, `repo`, `forward_state`, run·시도 수, 마지막 HTTP 코드나 오류 종류, 시각(KST) |
 | 넣지 않는 것 | 토큰, 키, 서명, `summary` 원문, 본문, 전체 소스, diff |
 | 수동 복구 | 8.3 |
-| 경로가 동작하지 않을 때 | 담당자가 하루 1회 `outbox_status.py`로 직접 확인. 알림 송신 실패 자체를 journal에 기록. 그래도 확인이 없으면 Cue/Grok 쪽 사람 확인(1.2의 "실제 수신")으로 유실을 찾음 |
+| 경로가 동작하지 않을 때 | 메일 송신 실패를 journal에 기록. 담당자가 하루 1회 `outbox_status.py`로 직접 확인. 알림 송신 실패 자체를 journal에 기록. 그래도 확인이 없으면 Cue/Grok 쪽 사람 확인(1.2의 "실제 수신")으로 유실을 찾음 |
 
 ### 8.2 설정 오류
 4xx로 `dead`면 노른(사용자)이 OCI env 파일을 고친 뒤 수동 재전달합니다.
@@ -230,7 +231,7 @@ v2 같은 비호환 변경은 아래 절차를 거치기 전에는 현행 계약
 | `verify_failed` | 확인 실패 | 아니오 | 가능: 정정 요청 1회 |
 | `needs_human` | 자동 판단 불가(순서 애매, 범위 위반, 민감정보, 재요청·정정 실패) | 아니오 | 노른(사용자) 조치만 |
 | `cancel_requested` | 취소 등록, Cue 확인 대기 | 아니오 | — |
-| `failed` | Cue가 `failed` 보고 | **예** (그 attempt) | 노른(사용자) 재지시만 |
+| `failed` | Cue가 `failed` 보고 | **예** | 불가(재지시는 새 handoff_id, T18) |
 | `completed` | 확인 통과 | **예** | 불가(새 handoff_id) |
 | `cancelled` | 취소 확정 | **예** | 불가(새 handoff_id) |
 | `expired` | 기한 초과 또는 노른(사용자) 종료 | **예** | 불가(새 handoff_id) |
@@ -257,7 +258,7 @@ v2 같은 비호환 변경은 아래 절차를 거치기 전에는 현행 계약
 | T15 | `dispatched`, `in_progress`, `needs_input`, `stale`, `verifying`, `verify_failed` | 순서 애매(10.2) | `needs_human` |
 | T16 | `needs_human` | 노른(사용자) 재지시 | `dispatched` |
 | T17 | `needs_human` | 노른(사용자) 종료 | `expired` |
-| T18 | `failed` | 노른(사용자) 재지시(`attempt` 정책은 결정 대기) | `dispatched` |
+| T18 | `failed` | 노른(사용자) 재지시: **새 handoff_id 발급**, 이전 ID 링크(9.6). 이전 handoff는 `failed` 유지 | (새 handoff) `dispatched` |
 | T19 | `dispatched`, `in_progress`, `needs_input`, `stale`, `verify_failed`, `needs_human` | 취소 등록 | `cancel_requested` |
 | T20 | `cancel_requested` | 취소 보고(9.4) | `cancelled` |
 | T21 | `cancel_requested` | T1 경과 | `cancelled` |
@@ -293,7 +294,7 @@ stateDiagram-v2
     verify_failed --> needs_human: T15
     needs_human --> dispatched: T16
     needs_human --> expired: T17
-    failed --> dispatched: T18
+    failed --> [*]: T18 새 handoff_id
     dispatched --> cancel_requested: T19
     in_progress --> cancel_requested: T19
     needs_input --> cancel_requested: T19
@@ -318,17 +319,24 @@ stateDiagram-v2
 ### 9.5 늦은 결과·중복 완료·취소 뒤 결과 처리
 | 경우 | 상태 | 기록 | 알림 | Grok 전달 |
 |---|---|---|---|---|
-| terminal 뒤 늦게 온 보고(T23) | 유지 | `late_report` 표시 | 노른(사용자)께 1회 | 결정 대기(제안: 전달하되 상태는 안 바꿈) |
-| `completed` 뒤 두 번째 `completed` | 유지, 첫 보고 기준 | `duplicate_completed` | 1회 | 결정 대기 |
-| `cancel_requested` 중 결과(T22) | 유지 | `after_cancel` | 1회 | 결정 대기 |
-| `cancelled` 뒤 결과(T23) | 유지 | `after_cancel` | 1회 | 결정 대기 |
+| terminal 뒤 늦게 온 보고(T23) | 유지 | `late_report` 표시 | 노른(사용자)께 1회 | **전달**, 표시 포함 [결정] |
+| `completed` 뒤 두 번째 `completed` | 유지, 첫 보고 기준 | `duplicate_completed` | 1회 | **전달**, 표시 포함 [결정] |
+| `cancel_requested` 중 결과(T22) | 유지 | `after_cancel` | 1회 | **전달**, 표시 포함 [결정] |
+| `cancelled` 뒤 결과(T23) | 유지 | `after_cancel` | 1회 | **전달**, 표시 포함 [결정] |
+
+[결정, 2026-10-30, 미구현] 표시는 Grok으로 가는 전달에 붙입니다. 표시 칸은 8필드 밖이므로 0.1.0 계약에서 정의합니다. 0.1.0 전에는 `summary`를 바꾸지 않고 Bridge 로그·알림에만 남깁니다.
+
+### 9.6 재지시 규칙 [결정, 2026-10-30, 미구현]
+- `failed`(또는 다른 terminal) 뒤 재지시는 **새 handoff_id**를 발급합니다.
+- 이전 ID는 메일 본문과 Issue 댓글에 `previous_handoff_id: <이전 ID>`로 남깁니다. 0.1.0 계약에 넣기 전까지 웹훅 필드로 보내지 않습니다.
+- `attempt`는 같은 handoff_id 안의 재실행(T13 정정, T16 재지시, T07 재요청 뒤 재실행)에서만 올라갑니다.
 
 ## 10. 순서 판단: `attempt`·`report_seq`
 
-### 10.1 결정: **현행 8필드 계약에 넣지 않습니다**
+### 10.1 결정: **0.1.0에 도입(BREAKING), 현행 계약(0.0.x)에는 없음** [결정, 2026-10-30, 미구현]
 - 현행 전달 필드는 8개뿐입니다 [현행 구현] (`forward.py: FORWARD_FIELDS`, `test_forward_payload_is_the_handoff_whitelist`). 요청 모델은 모르는 키를 400으로 거절합니다(`test_unknown_top_level_field_is_400`). 즉 지금 Cue가 `attempt`를 보내면 **거절됩니다**.
-- 향후 MINOR + **BREAKING** 버전에서 추가를 제안합니다 [제안·미구현, 결정 대기]:
-  - `attempt`: 필수, 정수 ≥1. 같은 handoff_id 안에서 재지시(T13/T16/T18)마다 +1. 한 attempt = 한 "세대"
+- **0.1.0**(MINOR + **BREAKING**, HMAC v2와 함께)에 추가합니다 [결정, 미구현]. 그 전까지는 10.2(N1~N5) 규칙으로 `needs_human`에 멈춥니다:
+  - `attempt`: 필수, 정수 ≥1. 같은 handoff_id 안의 재실행(T13/T16)마다 +1. `failed` 뒤 재지시(T18)는 새 handoff_id이므로 1부터. 한 attempt = 한 "세대"
   - `report_seq`: 필수, 정수 ≥1. 같은 attempt 안에서 보고마다 +1, attempt가 바뀌면 1부터
   - 순서 = `(attempt, report_seq)` 사전순. 이전 세대 보고는 기록만 하고 상태를 바꾸지 않음
   - 같은 `(handoff_id, attempt, report_seq)`에 다른 바디 → `409 sequence_conflict`
@@ -342,7 +350,7 @@ stateDiagram-v2
 ```
 (다른 필수 필드는 생략. 키 문자열은 순서 판단에 쓰지 않습니다.)
 
-### 10.2 필드가 없는 동안의 판정 규칙 [제안·미구현]
+### 10.2 필드가 없는 동안(0.1.0 전)의 판정 규칙 [제안·미구현]
 `created_at`이나 키 문자열로 순서를 추정하지 않습니다 [결정]. 아래 중 하나면 `needs_human`(T15)입니다. terminal 상태에서는 상태를 바꾸지 않고 9.5대로 처리합니다.
 | 기준 | 테스트(제안) |
 |---|---|
@@ -362,7 +370,7 @@ stateDiagram-v2
 | A2 | 메일 중복 수신 | 미처리 | Cue는 처리한 handoff면 같은 바디·키로 다시 보냄. Bridge는 6.3 | S3 |
 | A3 | 모르는 handoff_id | UUID 형식만 | 등록 기능 결정 후 `404 unknown_handoff` | S1 |
 | A4 | 참조 불일치 | 4.1 형식만 | Cue `needs_input`(4.3), 등록 기능 후 `409 handoff_mismatch` | S1 |
-| A5 | Cue 무응답 | 미처리 | T06 → T07 → T08 | S1 |
+| A5 | Cue 무응답 | 미처리 | T1=24시간 [결정] T06 → T07 → T08 | S1 |
 | A6 | 서명·Bearer 오류 | 401 | 로그에 사유만, 연속 5회면 8절 | S3 재서명 |
 | A7 | 시계 오차 | 401 | A6과 같음 | S3 |
 | A8 | 서명 재생 | 401, 메모리만 | 5.2 영속화 | — |
@@ -394,7 +402,7 @@ stateDiagram-v2
 | B6 | 산출물 중복 | 시작 전 기존 브랜치·PR 확인 | 첫 completed 유지(9.5) |
 | B7 | 취소 | **9.4 규칙** | 9.4 |
 | B8 | 실패를 모르고 completed | GitHub 결과 링크가 있을 때만 `completed` | T04 → T12 |
-| B9 | 비밀·PII 혼입 | 콜백에 넣지 않음. 산출물에 있으면 `needs_input` | 422 또는 가림(결정 대기), T15 |
+| B9 | 비밀·PII 혼입 | 콜백에 넣지 않음. 산출물에 있으면 `needs_input` | **422로 거부** [결정], T15 |
 | B10 | handoff_id 상실 | 메일 값 그대로, 모르면 `needs_input` | 404(등록 기능 후) |
 | B11 | Cue POST 실패 | 7.3 | 6.3 |
 
@@ -417,7 +425,7 @@ stateDiagram-v2
 4. Cue가 서명 POST 1건을 보냅니다: `status: "needs_input"`, 짧은 `summary`, `links`에 그 GitHub 링크, `next_owner: "grok"`. 전문·diff는 넣지 않습니다.
 5. Bridge 응답 `202`는 접수일 뿐입니다(1.2). 상태는 T03으로 `needs_input`이 되고, Grok 측 답변 메일(T09)로 이어집니다.
 
-- Cue의 GitHub 쓰기 권한(댓글·브랜치·PR)은 [미검증 전제]입니다. 현재는 소유자 계정을 공유하므로 권한은 과하게 넓고 범위 제한은 문서로만 지켜집니다(2.1). 권한이 없으면 3단계 없이 `needs_input`에 사유만 적습니다.
+- Cue 쓰기 범위는 브랜치·PR·Issue 댓글, 머지 금지 [결정]. 현재는 소유자 계정을 공유하므로 권한은 과하게 넓고, main 직접 push만 브랜치 보호로 막히며 머지 금지는 문서로만 지켜집니다(2.1). 권한이 없으면 3단계 없이 `needs_input`에 사유만 적습니다.
 - 아래는 Grok에 전달되는 8필드 모양입니다(요청 본문은 `schema_version`, `title`, `created_at` 등 13필드 스키마를 따름).
 
 ```json
@@ -435,15 +443,15 @@ stateDiagram-v2
 | P2 | SQLite 접수·replay, 202 전 커밋, 실패 503 | `test_replay_rejected_after_restart`, `test_same_key_after_restart_returns_stored`, `test_replay_store_unavailable_fails_closed` |
 | P3 | 아웃박스·`forward_state`·재시도·dead | `test_forwarded_true_only_after_2xx`, `test_first_202_is_queued`, `test_replay_returns_original_body_with_state`, `test_replay_never_reforwards_queued_delivered_dead`, `test_seven_attempts_including_first_then_dead`, `test_retry_after_overrides_backoff_capped`, `test_sixty_minute_budget_from_first_attempt`, `test_4xx_is_dead_immediately`, `test_sending_row_resent_after_restart` |
 | P4 | `redeliver.py`·`outbox_status.py` | `test_redeliver_dry_run_sends_nothing`, `test_redeliver_send_only_with_flag`, `test_redeliver_appends_run_keeps_history`, `test_alert_payload_has_no_secret_source_or_diff` |
-| P5 | 알림 경로(8.1 결정 후) | 가짜 수신처 dead 1건 → 알림 1건 |
+| P5 | 노른(사용자) 이메일 알림(8.1) | 가짜 수신처 dead 1건 → 알림 1건 |
 | P6 | 상태 계약(9절) | `test_transition_table_matches_doc`, `test_terminal_states_never_change`, `test_cancel_report_moves_to_cancelled`, 10.2 테스트들 |
 | P7 | (결정 후) handoff 등록, 404·409 | `test_unknown_handoff_404`, `test_handoff_mismatch_409` |
-| P8 | (결정 후) HMAC v2 + 5.3 전환 | `test_v2_signature_binds_method_and_path`, `test_v1_v2_overlap_window` |
+| P8 | HMAC v2(메서드·경로) + 5.3 전환, 0.1.0 | `test_v2_signature_binds_method_and_path`, `test_v1_v2_overlap_window` |
 | P9 | (결정 후) T1·T2 감시 | 가짜 시계 → `stale`/`expired` |
 | P10 | (결정 후) completed 검증(4.2) | 정상 / 링크 404 / SHA 없음 |
 | P11 | (결정 후) 취소 | `test_cancel_idempotent`, `test_result_after_cancel_recorded` |
-| P12 | (결정 후) 민감정보 검사 | 가짜 패턴 → 422, 로그 원문 없음 |
-| P13 | (결정 후) `attempt`/`report_seq`(10.1) | `test_spec.py`·`test_forward_fields` 갱신, `test_sequence_conflict_409` |
+| P12 | 민감정보 검사, 422 거부 | 가짜 패턴 → 422, 로그 원문 없음 |
+| P13 | `attempt`/`report_seq`(10.1), 0.1.0 | `test_spec.py`·`test_forward_fields` 갱신, `test_sequence_conflict_409` |
 
 P3은 응답 의미를 바꾸므로(첫 202가 `forwarded:false`) Grok·Cue 공지가 함께 필요합니다.
 
@@ -451,7 +459,7 @@ P3은 응답 의미를 바꾸므로(첫 202가 `forwarded:false`) Grok·Cue 공�
 - 현재 main(`2483c3b`) = **0.0.1**. 루트 `VERSION`, `CHANGELOG.md` (미구현)
 - 1.0 전: 문서·버그 = PATCH, 기능 = MINOR, 호환 깨짐(서명·필드) = MINOR + **BREAKING**
 - 버전은 머지되는 PR 안에서 올림. 태그는 노른(사용자) 승인 후에만
-- 목표: P0 = **0.0.2**, P1~P7·P9~P12 = **0.1.0**부터, P3 = MINOR(응답 의미 변경 공지), P8 = MINOR **BREAKING**, P13 = MINOR **BREAKING**
+- 목표: P0 = **0.0.2**. **0.1.0 = P13 순번 필드 + P8 HMAC v2 (BREAKING)** [결정]. P1~P7·P9~P12는 0.1.0 이후 MINOR/PATCH, P3 = MINOR(응답 의미 변경 공지)
 
 ## 13. 결정 사항
 
@@ -462,52 +470,55 @@ P3은 응답 의미를 바꾸므로(첫 202가 `forwarded:false`) Grok·Cue 공�
 4. `forwarded: true`는 2xx 확인 시에만(6.1)
 5. 최소 1회·중복 가능. "사실상 1회"·"중복 없는 1회" 표현 금지
 6. 순서는 명시 순번으로만, `created_at`·키 문자열 추정 금지
-7. 최종 실패 시 별도 알림·수동 복구, 알림에 비밀·소스·diff 금지(경로 자체는 미해결, 8.1)
+7. 최종 실패 시 별도 알림·수동 복구, 알림에 비밀·소스·diff 금지(8.1)
 8. Cue 콜백 규칙(11-C), 자동 감시·heartbeat 제외
+
+### 13.1a 확정(노른(사용자), 2026-10-30 17:31–17:34 KST) [결정, 모두 미구현]
+1. 최종 전달 실패 알림 = 노른(사용자) 이메일(8.1). 주소는 문서에 쓰지 않음. 메일 실패 시 journal·`outbox_status.py`
+2. `attempt`/`report_seq`는 0.1.0에 도입(BREAKING). 그 전에는 N1~N5(10.2)
+3. HMAC v2는 메서드·경로 포함, 0.1.0에 순번 필드와 함께, v1/v2 동시 수용 전환(5.3)
+4. 키 교체 90일마다, 유출 의심 시 즉시(5.2)
+5. 재시도 첫 시도 포함 7회·총 60분(7.1). Cue 무응답 시간 초과 T1 = 24시간
+6. 늦은 결과·중복 완료·취소 뒤 결과는 표시를 붙여 Grok에 전달, 상태는 유지(9.5)
+7. `failed` 뒤 재지시는 새 handoff_id + 이전 ID 링크(9.6). `attempt`는 같은 handoff_id 재실행에서만 증가
+8. 민감정보 섞인 보고는 422 거부
+9. Cue GitHub 쓰기 = 브랜치·PR·Issue 댓글, 머지 금지
+10. 당분간 같은 계정 유지. 위험 남음. main 보호는 적용됨(2.1, 17:27 KST 확인)
 
 ### 13.2 남은 결정 (책임자별)
 **노른(사용자)**
-1. 알림 경로 a/b/c 선택과 알림 수신·복구 담당자(8.1)
-2. `attempt`/`report_seq` 추가 여부와 시기(10.1, BREAKING)
-3. HMAC v2 메서드·경로 결합 여부와 시기(5.2)
-4. 키 교체 주기(5.2)
-5. 재시도 수치 확정: 7회·1~30분·Retry-After 30분 상한·60분 한도(7.1)
-6. T1·T2 값(제안 24h·72h)
-7. 늦은 결과·중복 완료·취소 뒤 결과의 Grok 전달 여부(9.5)
-8. `failed` 뒤 재지시: 같은 handoff_id + attempt+1 / 새 handoff_id
-9. 민감정보 감지 시 422 / 가림
+1. T2 값(`needs_input` 응답 기한, 제안 72h)
+2. 복구 실행(`redeliver.py`) 담당 지정(8.1, Nornen 후보)
+2a. 재생 기록 SQLite 영속화(5.2) 채택 여부
 
 **Grok/PM**
-10. 4.2(b) 실제 존재·허용 확인을 누가 어떤 읽기 권한으로 할지 제안(Grok `gh` / Bridge 읽기 토큰 = 새 비밀값)
-11. 취소·재요청·정정 메일 형식
-12. Grok 웹훅의 `idempotency_key` 영속 중복 제거 여부 확인(6.1 전제)
-13. Grok 웹훅 오류 응답 형태(4xx/5xx, `Retry-After`) 확인
-14. P3 응답 의미 변경 공지 방법
+3. 4.2(b) 실제 존재·허용 확인을 누가 어떤 읽기 권한으로 할지 제안(Grok `gh` / Bridge 읽기 토큰 = 새 비밀값)
+4. 취소·재요청·정정·재지시 메일 형식(`previous_handoff_id` 포함)
+5. Grok 웹훅의 `idempotency_key` 영속 중복 제거 여부 확인(6.1 전제)
+6. Grok 웹훅 오류 응답 형태(4xx/5xx, `Retry-After`) 확인
+7. P3 응답 의미 변경 공지 방법
 
 **커서**
-15. SQLite 위치·보관 기간(제안 30일), 감시기를 앱 안 / systemd timer 중 어디에 둘지 설계안
-16. `handoff` 등록 엔드포인트(`POST /v1/handoffs`) 설계안 — 채택은 노른(사용자)
+8. SQLite 위치·보관 기간(제안 30일), 감시기를 앱 안 / systemd timer 중 어디에 둘지
+9. 이메일 알림 발송 수단(8.1)
+10. 0.1.0 계약 초안: 순번 필드·늦은 결과 표시 칸·`previous_handoff_id` 포함 여부
+11. `handoff` 등록 엔드포인트(`POST /v1/handoffs`) 설계안 — 채택은 노른(사용자)
 
 **Cue**
-17. 같은 바디·키 재서명 재시도 지원 여부(7.3)
-18. 취소 메일 처리와 `[cancelled]` 보고 지원 여부(9.4)
-19. 4.2 확인에 쓰는 GitHub 읽기 권한 범위
-20. HMAC v2 서명 가능 여부
-21. 작업 브랜치 이름 규칙(예: `cue/{handoff_id}`) 수용 여부
-
-**노른(사용자), 추가**
-24. Cue에 GitHub 쓰기 권한(Issue 댓글, main 외 브랜치 문서 PR)을 줄지, 범위는 배정 저장소로 한정할지(11-D)
-25. (a) main 브랜치 보호 — 더 이상 열린 결정이 아님 [현행]. 이미 적용되어 있습니다. `enforce_admins=true`, PR 필수, 승인 0개 필수, force push와 삭제 금지, 필수 status check 없음. 2026-10-30 17:27 KST에 `gh api`로 확인했습니다(2.1). 같은 계정이므로 PR 생성과 머지는 기술적으로 가능하고, 문서에 적힌 규칙으로만 통제됩니다. 앱 코드의 [현행 구현]이 아니라 GitHub 저장소 설정입니다.
-26. (b) 나중에 Cue 전용 계정 또는 이 저장소로 범위를 좁힌 fine-grained token으로 분리할지(2.1)
+12. 같은 바디·키 재서명 재시도 지원 여부와 수치(7.3)
+13. 취소 메일 처리와 `[cancelled]` 보고 지원 여부(9.4)
+14. 4.2 확인에 쓰는 GitHub 읽기 권한 범위
+15. HMAC v2 서명·순번 필드 지원 가능 여부(0.1.0)
+16. 작업 브랜치 이름 규칙(예: `cue/{handoff_id}`) 수용 여부
 
 **Nornen**
-22. 운영 담당으로 알림 수신·`redeliver.py` 실행을 맡을지(8.1, 노른(사용자) 지정 필요)
-23. grok-cue 머지는 매번 노른(사용자) 승인 후 실행(자동 머지 대상 아님)
+17. 운영 담당으로 `redeliver.py` 실행을 맡을지(노른(사용자) 지정 필요)
+18. grok-cue 머지는 매번 노른(사용자) 승인 후 실행(자동 머지 대상 아님)
 
 ## 14. 미검증 전제 모음
 - Cue의 단건 POST 이외 동작 전부(재시도, 재서명, 실패 알림, 중복 메일, 재요청 응답, 취소 처리, 비밀 스캔, 4절·11-C 규칙 준수)
 - 모든 Cue 채팅 작업의 자동 전송
-- Cue 전용 계정·토큰 설정 여부(2.1). main 브랜치 보호는 2026-10-30 17:27 KST `gh api` 확인으로 [현행]입니다(2.1, 13항 25).
+- Cue가 머지 금지 규칙을 지키는지(같은 계정이라 기술적 강제 없음, 2.1)
 - Grok 웹훅의 영속 중복 제거와 오류 응답 형태
 - 다른 환경의 설치 호환성
 - 이 문서의 모든 [제안·미구현] 기능
