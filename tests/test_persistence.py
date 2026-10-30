@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from tests.conftest import build_harness
 from tests.support import HMAC_KEY, HANDOFF_ID, sign, task_body
 
@@ -24,6 +26,7 @@ def test_same_key_after_restart_returns_stored(tmp_path: Path) -> None:
         "status": "received",
         "executed": False,
         "forwarded": False,
+        "forward_state": "disabled",
     }
     _close(first_app)
 
@@ -57,12 +60,18 @@ def test_replay_rejected_after_restart(tmp_path: Path) -> None:
     _close(restarted)
 
 
-def test_replay_store_unavailable_fails_closed(tmp_path: Path) -> None:
+def test_replay_store_unavailable_fails_closed(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    import logging
+
+    caplog.set_level(logging.INFO, logger="grok_cue")
     blocked = tmp_path / "not-a-database-file"
     blocked.mkdir()
     harness = build_harness(state_db=str(blocked))
-    response = harness.post(task_body())
+    response = harness.post(task_body(summary="SUMMARY_SHOULD_NOT_BE_LOGGED"))
     assert response.status_code == 503
     assert response.json() == {"error": "storage_unavailable"}
     assert harness.notifier.events == []
+    assert "state_db=unavailable" in caplog.text
+    assert str(blocked) not in caplog.text
+    assert "SUMMARY_SHOULD_NOT_BE_LOGGED" not in caplog.text
     _close(harness)

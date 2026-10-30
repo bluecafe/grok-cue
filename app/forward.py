@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from dataclasses import dataclass
 from typing import Any, Literal
 
 import httpx2 as httpx
@@ -19,6 +20,23 @@ FORWARD_TIMEOUT_SECONDS = 5.0
 RETRYABLE_HTTP_STATUSES = frozenset({408, 425, 429})
 
 ForwardClass = Literal["skipped", "delivered", "retryable", "dead"]
+OutcomeKind = Literal["delivered", "retryable", "dead"]
+
+
+@dataclass(frozen=True)
+class AttemptResult:
+    kind: OutcomeKind
+    http_status: int | None = None
+    retry_after: float | None = None
+
+
+def parse_retry_after(value: str | None) -> float | None:
+    if value is None:
+        return None
+    text = value.strip()
+    if not text or not text.isdigit():
+        return None
+    return float(text)
 
 # Top-level keys sent to Grok. Nothing else from the Cue body is copied.
 FORWARD_FIELDS = (
@@ -84,12 +102,14 @@ class GrokForwarder:
     def enabled(self) -> bool:
         return self._settings.forwarding_enabled()
 
-    async def send(self, handoff_id: str, payload: dict[str, Any]) -> None:
+    async def attempt(self, payload: dict[str, Any]) -> AttemptResult:
+        """One delivery try. The outbox decides whether another try is allowed."""
+        handoff_id = str(payload.get("handoff_id", ""))
         url = self._settings.grok_webhook_url
         key = self._settings.grok_webhook_key
         if not url or not key:
             logger.info("forward handoff_id=%s outcome=skipped class=skipped", handoff_id)
-            return
+            return AttemptResult(kind="dead")
         headers = forward_headers(key, self._settings.grok_webhook_key_header)
         try:
             async with httpx.AsyncClient(
@@ -105,19 +125,19 @@ class GrokForwarder:
                 "forward handoff_id=%s outcome=timeout class=retryable",
                 handoff_id,
             )
-            return
+            return AttemptResult(kind="retryable")
         except httpx.TransportError:
             logger.info(
                 "forward handoff_id=%s outcome=connection_error class=retryable",
                 handoff_id,
             )
-            return
+            return AttemptResult(kind="retryable")
         except Exception:
             # Not a timeout or connection error, so it is outside the retryable
-            # set. An unexpected failure stays dead: P1 does not retry it, and
-            # retrying an unknown bug could repeat a partial side effect.
+            # set. An unexpected failure stays dead: retrying an unknown bug
+            # could repeat a partial side effect.
             logger.info("forward handoff_id=%s outcome=error class=dead", handoff_id)
-            return
+            return AttemptResult(kind="dead")
         outcome_class = classify_http_status(response.status_code)
         logger.info(
             "forward handoff_id=%s outcome=http status=%s class=%s",
@@ -125,3 +145,8 @@ class GrokForwarder:
             response.status_code,
             outcome_class,
         )
+        retry_after = None
+        if outcome_class == "retryable":
+            retry_after = parse_retry_after(response.headers.get("retry-after"))
+        kind: OutcomeKind = outcome_class if outcome_class in {"delivered", "retryable", "dead"} else "dead"
+        return AttemptResult(kind=kind, http_status=response.status_code, retry_after=retry_after)

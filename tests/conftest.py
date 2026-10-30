@@ -8,6 +8,8 @@ os.environ.setdefault("REPLY_TO_DEFAULT", "cue@example.com")
 
 from collections.abc import Callable, Iterator
 
+import asyncio
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -40,6 +42,8 @@ class Harness:
         self.notifier = notifier
         self.settings = settings
         self.now = now
+        self.outbox = None
+        self.forwarder = None
 
     def post(
         self,
@@ -66,6 +70,9 @@ class Harness:
             headers.pop(name, None)
         return self.http.post("/v1/cue/tasks", content=body, headers=headers)
 
+    def pump(self, at: float, jitter: float = 1.0) -> None:
+        asyncio.run(self.outbox.pump(self.forwarder, at, jitter))
+
 
 def build_harness(
     *,
@@ -79,6 +86,8 @@ def build_harness(
     state_db: str | None = None,
     forwarder: GrokForwarder | None = None,
     now: float = FIXED_NOW,
+    jitter=None,
+    auto_pump: bool = True,
 ) -> Harness:
     settings = Settings(
         cue_bridge_token=TOKEN,
@@ -98,8 +107,13 @@ def build_harness(
         clock=lambda: now,
         notifier=notifier,
         forwarder=forwarder,
+        jitter=jitter,
+        auto_pump=auto_pump,
     )
-    return Harness(TestClient(app), notifier, settings, now)
+    built = Harness(TestClient(app), notifier, settings, now)
+    built.outbox = app.state.bridge.outbox
+    built.forwarder = app.state.bridge.forwarder
+    return built
 
 
 @pytest.fixture

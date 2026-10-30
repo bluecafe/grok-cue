@@ -23,6 +23,7 @@ from app.auth import (
 from app.forward import GrokForwarder, handoff_payload
 from app.models import CueTaskRequest
 from app.notify import LogNotifier, Notifier
+from app.outbox import MemoryOutbox, jitter_factor
 from app.persistence import ReplaySeen, StateDB, StorageUnavailable
 from app.redact import SecretRedactingFilter
 from app.reply_to import ReplyToNotAllowed, resolve_reply_to
@@ -43,7 +44,9 @@ class AppState:
     replay: ReplayCache | StateDB
     notifier: Notifier
     forwarder: GrokForwarder
+    outbox: MemoryOutbox | StateDB
     durable: StateDB | None = None
+    jitter: Callable[[], float] = jitter_factor
 
 
 def _install_redaction(settings: Settings) -> None:
@@ -117,10 +120,13 @@ def create_app(
     replay: ReplayCache | None = None,
     notifier: Notifier | None = None,
     forwarder: GrokForwarder | None = None,
+    jitter: Callable[[], float] | None = None,
+    auto_pump: bool = True,
 ) -> FastAPI:
     resolved = settings if settings is not None else Settings()
     _install_redaction(resolved)
     durable: StateDB | None = None
+    memory_outbox = MemoryOutbox()
     if store is None and replay is None and resolved.cue_state_db:
         durable = StateDB(resolved.cue_state_db)
         store = durable
@@ -132,8 +138,11 @@ def create_app(
         replay=replay or ReplayCache(),
         notifier=notifier or LogNotifier(),
         forwarder=forwarder or GrokForwarder(resolved),
+        outbox=durable if durable is not None else memory_outbox,
         durable=durable,
+        jitter=jitter or jitter_factor,
     )
+    state.auto_pump = auto_pump
     app = FastAPI(title="grok-cue", version="0.1.0", debug=False)
     app.state.bridge = state
 
@@ -274,6 +283,7 @@ def create_app(
             "status": "received",
             "executed": False,
         }
+        forward_payload = handoff_payload(model) if bridge.forwarder.enabled() else None
         try:
             if bridge.durable is not None:
                 result = bridge.durable.accept(
@@ -283,6 +293,9 @@ def create_app(
                     model.idempotency_key,
                     raw,
                     response_body,
+                    handoff_id=str(model.handoff_id),
+                    forward_payload=forward_payload,
+                    forwarding=forward_payload is not None,
                 )
             else:
                 result = bridge.store.register(
@@ -290,6 +303,14 @@ def create_app(
                     raw,
                     response_body,
                 )
+                if result.created:
+                    bridge.outbox.enqueue(
+                        model.idempotency_key,
+                        str(model.handoff_id),
+                        forward_payload,
+                        enabled=forward_payload is not None,
+                        now=now,
+                    )
         except ReplaySeen:
             logger.info("auth failed reason=replay")
             return unauthorized()
@@ -299,29 +320,31 @@ def create_app(
             logger.info("rejected error=idempotency_conflict")
             return json_error(409, "idempotency_conflict")
 
-        scheduled = False
         if result.created:
             bridge.notifier.accepted(
                 handoff_id=str(result.response["handoff_id"]),
                 repo=model.repo,
                 reply_to=reply_to,
             )
-            if bridge.forwarder.enabled():
-                scheduled = True
+            _forwarded, forward_state = bridge.outbox.view(model.idempotency_key)
+            if forward_state == "queued" and bridge.auto_pump:
                 background_tasks.add_task(
-                    bridge.forwarder.send,
-                    str(model.handoff_id),
-                    handoff_payload(model),
+                    bridge.outbox.pump,
+                    bridge.forwarder,
+                    now,
+                    bridge.jitter(),
                 )
         else:
             logger.info(
                 "idempotent handoff_id=%s created=false notify=skipped forward=skipped",
                 result.response["handoff_id"],
             )
-        # `forwarded` is per request. A stored replay must not look like a new send.
+        # `forwarded` is true only after Grok 2xx. A duplicate does not send again.
+        delivered, forward_state = bridge.outbox.view(model.idempotency_key)
         outgoing = dict(result.response)
         outgoing["executed"] = False
-        outgoing["forwarded"] = scheduled
+        outgoing["forwarded"] = delivered
+        outgoing["forward_state"] = forward_state
         return JSONResponse(status_code=202, content=outgoing, headers=_NO_STORE)
 
     @app.exception_handler(Exception)
