@@ -113,6 +113,9 @@ class GrokForwarder:
             )
             return
         except Exception:
+            # Not a timeout or connection error, so it is outside the retryable
+            # set. An unexpected failure stays dead: P1 does not retry it, and
+            # retrying an unknown bug could repeat a partial side effect.
             logger.info("forward handoff_id=%s outcome=error class=dead", handoff_id)
             return
         outcome_class = classify_http_status(response.status_code)
