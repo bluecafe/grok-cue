@@ -47,6 +47,8 @@ first acceptance of an idempotency key. The `202` is returned after that accepta
 
 After the 0.2.0 deployment at 2026-10-30 23:00 KST, dummy requests with v1 and with no version header both returned `401` (`unknown_signature_version`) and nothing was queued in the outbox. A v2 dummy request returned `202`, was `delivered`, and stored `signature_version=2`. `healthz` returned `200`. One real Cue request at 2026-10-30 22:40 KST was confirmed as v2 (journal and DB `signature_version=2`).
 
+At 2026-10-30 23:53 KST the 0.2.1 release `app-9875680` was deployed. The rollback target is `app-5e34836`, and the backup name is `state.db.bak-5e34836`. `healthz` returned `200`. `/docs`, `/redoc`, and `/openapi.json` returned `404`. An unsigned POST returned `401`. The `Content-Security-Policy` header was `default-src 'none'; frame-ancestors 'none'`. v1 returned `401` (`unknown_signature_version`). v2 returned `202`, was `delivered`, and stored `signature_version=2`. Retention stayed at the default 30 days, with no environment change.
+
 ## Install
 
 Have the following ready before installing; check each with the command shown.
