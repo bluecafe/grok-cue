@@ -25,6 +25,8 @@ Without `GROK_WEBHOOK_KEY_HEADER` it sends `Authorization: Bearer <GROK_WEBHOOK_
 
 `forwarded: true` means that outbox row recorded a Grok 2xx. The first `202` goes out before that, so `forwarded` is `false`. Without settings, `forward_state` is `disabled`. Resending the same body does not forward again; `forwarded` is the outbox state at that moment.
 
+After the 0.2.0 deployment at 2026-10-30 23:00 KST, dummy requests with v1 and with no version header both returned `401` (`unknown_signature_version`) and nothing was queued in the outbox. A v2 dummy request returned `202`, was `delivered`, and stored `signature_version=2`. `healthz` returned `200`.
+
 Unknown keys are rejected. There are no fields for `diff`, `patch`, `source`, file contents, or secrets. The body limit is 64 KiB (65536 bytes). It is checked before authentication; larger bodies get `400 invalid_request` with `fields` = `body`.
 
 ## Conventions people follow

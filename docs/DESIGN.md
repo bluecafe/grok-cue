@@ -25,6 +25,8 @@
 
 `forwarded`가 `true`이면 그 아웃박스 행이 Grok 2xx를 기록한 것입니다. 첫 `202`는 그 전에 나가므로 `forwarded`는 `false`입니다. 설정이 없으면 `forward_state`는 `disabled`입니다. 같은 본문을 다시 보내도 전달은 새로 하지 않고, `forwarded`는 그때의 아웃박스 상태입니다.
 
+2026-10-30 23:00 KST에 0.2.0을 배포한 뒤 확인했습니다. v1과 버전 헤더가 없는 더미 요청은 둘 다 `401`(`unknown_signature_version`)이었고 아웃박스에는 쌓이지 않았습니다. v2 더미 요청은 `202`, `delivered`, `signature_version=2`였습니다. `healthz`는 `200`이었습니다.
+
 본문에 없는 키는 거절합니다. `diff`, `patch`, `source`, 파일 본문, 비밀을 넣는 칸은 없습니다. 본문 상한은 64 KiB(65536바이트)입니다. 이 크기는 인증보다 먼저 검사하며, 넘으면 `400 invalid_request`(`fields`는 `body`)입니다.
 
 ## 사람이 맞추는 약속

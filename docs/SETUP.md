@@ -252,7 +252,7 @@ Cue는 `POST https://hook.example.com/v1/cue/tasks`로 JSON을 보냅니다. 로
 ### Cue 쪽 설정
 
 > [!NOTE]
-> **2026-10-29 확인:** 그 환경이 서명된 JSON POST를 실제로 보냈고, HTTP `202`와 `status`=`received`, `executed`=`false`, `forwarded`=`true`를 받았습니다. 하류 수신은 16:05 KST에 노른(사용자)가 확인했습니다. 이 기록은 그 요청 한 건만 말합니다. 그 뒤 0.1.0 더미 실서버 확인은 6/6 통과입니다. Cue 실제 요청 1건이 접수되고 전달되었으며, 그 요청의 서명 버전은 확인되지 않았습니다. 지금의 `forwarded: true`는 Grok 2xx가 기록된 뒤에만입니다. 아래는 Cue의 화면이나 메뉴가 아니라, 보내는 쪽이 지켜야 하는 일반 요구 사항입니다.
+> **2026-10-29 확인:** 그 환경이 서명된 JSON POST를 실제로 보냈고, HTTP `202`와 `status`=`received`, `executed`=`false`, `forwarded`=`true`를 받았습니다. 하류 수신은 16:05 KST에 노른(사용자)가 확인했습니다. 이 기록은 그 요청 한 건만 말합니다. 그 뒤 0.1.0 더미 실서버 확인은 6/6 통과입니다. Cue 실제 요청 1건이 접수되고 전달되었습니다. 2026-10-30 22:40 KST의 Cue 실제 요청 1건은 v2로 확인되었습니다(저널과 DB의 `signature_version=2`). 2026-10-30 23:00 KST에 0.2.0을 배포한 뒤 확인했습니다. v1과 버전 헤더가 없는 더미 요청은 둘 다 `401`(`unknown_signature_version`)이었고 아웃박스에는 쌓이지 않았습니다. v2 더미 요청은 `202`, `delivered`, `signature_version=2`였습니다. `healthz`는 `200`이었습니다. 지금의 `forwarded: true`는 Grok 2xx가 기록된 뒤에만입니다. 아래는 Cue의 화면이나 메뉴가 아니라, 보내는 쪽이 지켜야 하는 일반 요구 사항입니다.
 
 Cue 쪽 흐름:
 

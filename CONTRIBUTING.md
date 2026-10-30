@@ -13,3 +13,5 @@ pytest
 ```
 
 `.env.example`은 자리표시자입니다. `.env`와 실제 토큰, HMAC 키, Grok 키는 커밋하지 않습니다.
+
+버전을 올릴 때는 `VERSION`, `pyproject.toml`, `app/__init__.py`의 `__version__`, `CHANGELOG.md`, `CHANGELOG.en.md`를 함께 고칩니다.

@@ -1,3 +1,8 @@
-"""Cue × Grok handoff bridge. Local accept-only skeleton."""
+"""Cue × Grok handoff bridge.
 
-__version__ = "0.1.0"
+Accepts HMAC-SHA256 v2 signed task reports, records them, and forwards the
+first acceptance to Grok through an outbox. It does not run, merge, or deploy
+the reported work.
+"""
+
+__version__ = "0.2.0"

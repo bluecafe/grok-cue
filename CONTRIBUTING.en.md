@@ -13,3 +13,5 @@ pytest
 ```
 
 `.env.example` contains placeholders. Never commit `.env` or real tokens, HMAC keys, or Grok keys.
+
+When bumping the version, update `VERSION`, `pyproject.toml`, `__version__` in `app/__init__.py`, `CHANGELOG.md`, and `CHANGELOG.en.md` together.
