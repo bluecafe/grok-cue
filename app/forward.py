@@ -108,6 +108,8 @@ class GrokForwarder:
         url = self._settings.grok_webhook_url
         key = self._settings.grok_webhook_key
         if not url or not key:
+            # No webhook is configured for this process. A queued row then
+            # becomes dead instead of waiting, including after a restart.
             logger.info("forward handoff_id=%s outcome=skipped class=skipped", handoff_id)
             return AttemptResult(kind="dead")
         headers = forward_headers(key, self._settings.grok_webhook_key_header)

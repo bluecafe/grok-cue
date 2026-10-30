@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
 from collections.abc import Callable
+from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
 
 from fastapi import BackgroundTasks, FastAPI, Request
@@ -23,7 +25,7 @@ from app.auth import (
 from app.forward import GrokForwarder, handoff_payload
 from app.models import CueTaskRequest
 from app.notify import LogNotifier, Notifier
-from app.outbox import MemoryOutbox, jitter_factor
+from app.outbox import MemoryOutbox, jitter_factor, run_outbox_worker
 from app.persistence import ReplaySeen, StateDB, StorageUnavailable
 from app.redact import SecretRedactingFilter
 from app.reply_to import ReplyToNotAllowed, resolve_reply_to
@@ -112,6 +114,20 @@ def json_has_key(value: object, key: str) -> bool:
     return False
 
 
+@asynccontextmanager
+async def _outbox_lifespan(app: FastAPI):
+    """One in-process worker. It pumps immediately, then on the poll interval."""
+    stop = asyncio.Event()
+    task = asyncio.create_task(run_outbox_worker(app.state.bridge, stop))
+    try:
+        yield
+    finally:
+        stop.set()
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
+
+
 def create_app(
     settings: Settings | None = None,
     *,
@@ -143,7 +159,7 @@ def create_app(
         jitter=jitter or jitter_factor,
     )
     state.auto_pump = auto_pump
-    app = FastAPI(title="grok-cue", version="0.1.0", debug=False)
+    app = FastAPI(title="grok-cue", version="0.1.0", debug=False, lifespan=_outbox_lifespan)
     app.state.bridge = state
 
     @app.get("/healthz")

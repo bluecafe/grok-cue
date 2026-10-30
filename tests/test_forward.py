@@ -59,6 +59,9 @@ def _harness(
     state_db: str | None = None,
     jitter=None,
     auto_pump: bool = True,
+    clock=None,
+    poll_seconds: float = 5.0,
+    lifespan: bool = False,
 ) -> Harness:
     settings_kwargs = {
         "grok_webhook_url": url,
@@ -79,6 +82,9 @@ def _harness(
         state_db=state_db,
         jitter=jitter,
         auto_pump=auto_pump,
+        clock=clock,
+        poll_seconds=poll_seconds,
+        lifespan=lifespan,
     )
 
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import random
 import threading
 from dataclasses import dataclass
@@ -47,6 +48,7 @@ class MemoryOutbox:
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
+        self._pump_lock = asyncio.Lock()
         self._rows: dict[str, dict] = {}
 
     def enqueue(
@@ -131,10 +133,29 @@ class MemoryOutbox:
         now: float,
         jitter: float | None = None,
     ) -> None:
-        factor = jitter_factor() if jitter is None else jitter
-        for job in self.claim_due(now):
-            result = await forwarder.attempt(job.payload)
-            self.finish(job, result, now, factor)
+        async with self._pump_lock:
+            factor = jitter_factor() if jitter is None else jitter
+            for job in self.claim_due(now):
+                result = await forwarder.attempt(job.payload)
+                self.finish(job, result, now, factor)
+
+
+async def run_outbox_worker(bridge: object, stop: asyncio.Event) -> None:
+    """Poll the outbox until shutdown. The first pass runs immediately."""
+    interval = float(bridge.settings.cue_outbox_poll_seconds)  # type: ignore[attr-defined]
+    recover = getattr(bridge.outbox, "recover_sending", None)  # type: ignore[attr-defined]
+    if recover is not None:
+        recover()
+    while not stop.is_set():
+        await bridge.outbox.pump(  # type: ignore[attr-defined]
+            bridge.forwarder,  # type: ignore[attr-defined]
+            bridge.clock(),  # type: ignore[attr-defined]
+            bridge.jitter(),  # type: ignore[attr-defined]
+        )
+        try:
+            await asyncio.wait_for(stop.wait(), timeout=interval)
+        except TimeoutError:
+            continue
 
 
 def _job(row: dict) -> OutboxJob:

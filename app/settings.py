@@ -27,12 +27,21 @@ class Settings(BaseSettings):
     grok_webhook_key_header: str | None = None
     # Empty means process memory only. A path is chosen by the operator; there is no built-in location.
     cue_state_db: str | None = None
+    # Seconds between outbox polls in this process. The worker also pumps once at startup.
+    cue_outbox_poll_seconds: float = 5.0
 
     @field_validator("cue_bridge_token", "cue_bridge_hmac_key")
     @classmethod
     def required_secret(cls, value: str) -> str:
         if not isinstance(value, str) or not value.strip():
             raise ValueError("required")
+        return value
+
+    @field_validator("cue_outbox_poll_seconds")
+    @classmethod
+    def poll_is_positive(cls, value: float) -> float:
+        if value <= 0:
+            raise ValueError("CUE_OUTBOX_POLL_SECONDS")
         return value
 
     @field_validator(

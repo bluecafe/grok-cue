@@ -6,6 +6,7 @@ filesystem location. The raw signature is not stored; only its SHA-256 is.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -46,6 +47,7 @@ class StateDB:
     def __init__(self, path: str) -> None:
         self._path = path
         self._lock = threading.Lock()
+        self._pump_lock = asyncio.Lock()
         self._conn: sqlite3.Connection | None = None
         try:
             fd = os.open(path, os.O_CREAT | os.O_RDWR, 0o600)
@@ -99,7 +101,11 @@ class StateDB:
                 """
             )
             conn.execute(
-                "UPDATE outbox SET state = 'queued' WHERE state = 'sending'"
+                """
+                UPDATE outbox
+                SET state = 'queued', next_attempt_at = NULL
+                WHERE state = 'sending'
+                """
             )
             self._conn = conn
             self._restrict(path)
@@ -314,16 +320,29 @@ class StateDB:
                 raise StorageUnavailable from None
         return state
 
+    def recover_sending(self) -> None:
+        """Stale in-flight rows become due again. Attempt counts stay put."""
+        with self._lock:
+            conn = self._require()
+            conn.execute(
+                """
+                UPDATE outbox
+                SET state = 'queued', next_attempt_at = NULL
+                WHERE state = 'sending'
+                """
+            )
+
     async def pump(
         self,
         forwarder: GrokForwarder,
         now: float,
         jitter: float | None = None,
     ) -> None:
-        factor = jitter_factor() if jitter is None else jitter
-        for job in self.claim_due(now):
-            result = await forwarder.attempt(job.payload)
-            self.finish(job, result, now, factor)
+        async with self._pump_lock:
+            factor = jitter_factor() if jitter is None else jitter
+            for job in self.claim_due(now):
+                result = await forwarder.attempt(job.payload)
+                self.finish(job, result, now, factor)
 
     def _insert_outbox(
         self,

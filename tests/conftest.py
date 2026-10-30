@@ -44,6 +44,13 @@ class Harness:
         self.now = now
         self.outbox = None
         self.forwarder = None
+        self._entered = False
+
+    def close(self) -> None:
+        if self._entered:
+            self.http.__exit__(None, None, None)
+        else:
+            self.http.close()
 
     def post(
         self,
@@ -88,6 +95,9 @@ def build_harness(
     now: float = FIXED_NOW,
     jitter=None,
     auto_pump: bool = True,
+    clock: Callable[[], float] | None = None,
+    poll_seconds: float = 5.0,
+    lifespan: bool = False,
 ) -> Harness:
     settings = Settings(
         cue_bridge_token=TOKEN,
@@ -100,19 +110,24 @@ def build_harness(
         grok_webhook_key=grok_webhook_key,
         grok_webhook_key_header=grok_webhook_key_header,
         cue_state_db=state_db,
+        cue_outbox_poll_seconds=poll_seconds,
     )
     notifier = RecordingNotifier()
     app = create_app(
         settings,
-        clock=lambda: now,
+        clock=clock or (lambda: now),
         notifier=notifier,
         forwarder=forwarder,
         jitter=jitter,
         auto_pump=auto_pump,
     )
-    built = Harness(TestClient(app), notifier, settings, now)
+    http = TestClient(app)
+    built = Harness(http, notifier, settings, now)
     built.outbox = app.state.bridge.outbox
     built.forwarder = app.state.bridge.forwarder
+    if lifespan:
+        http.__enter__()
+        built._entered = True
     return built
 
 

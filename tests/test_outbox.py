@@ -210,6 +210,94 @@ def test_sending_row_resent_after_restart(tmp_path: Path) -> None:
     restarted.http.close()
 
 
+def test_retry_runs_as_time_passes_without_a_new_request(tmp_path: Path) -> None:
+    database = str(tmp_path / "state.sqlite")
+    clock = {"now": float(FIXED_NOW)}
+    capture = Capture(status=503)
+    harness = _harness(
+        capture,
+        state_db=database,
+        jitter=lambda: 1.0,
+        clock=lambda: clock["now"],
+        poll_seconds=0.05,
+        lifespan=True,
+    )
+    harness.post(task_body(idempotency_key="idem-worker"))
+    assert len(capture.requests) == 1
+    clock["now"] = float(FIXED_NOW) + 60
+    import time
+
+    time.sleep(0.25)
+    assert len(capture.requests) == 2
+    harness.close()
+
+
+def test_startup_pump_recovers_sending_and_due_rows(tmp_path: Path) -> None:
+    database = tmp_path / "state.sqlite"
+    stale = Capture(status=204)
+    first = _harness(stale, state_db=str(database), jitter=lambda: 1.0, auto_pump=False)
+    first.post(task_body(idempotency_key="idem-stale-sending"))
+    assert first.outbox.claim_due(float(FIXED_NOW))
+    assert first.outbox.snapshot("idem-stale-sending")["state"] == "sending"
+    first.http.close()
+
+    recovered = Capture(status=204)
+    started = _harness(
+        recovered,
+        state_db=str(database),
+        jitter=lambda: 1.0,
+        clock=lambda: float(FIXED_NOW),
+        lifespan=True,
+    )
+    assert len(recovered.requests) == 1
+    assert started.outbox.snapshot("idem-stale-sending")["state"] == "delivered"
+    started.close()
+
+    due_capture = Capture(status=503)
+    due_app = _harness(due_capture, state_db=str(database), jitter=lambda: 1.0, auto_pump=False)
+    due_app.post(task_body(idempotency_key="idem-due"))
+    due_app.pump(float(FIXED_NOW))
+    assert due_app.outbox.snapshot("idem-due")["state"] == "retrying"
+    due_app.http.close()
+
+    resumed = Capture(status=204)
+    resumed_app = _harness(
+        resumed,
+        state_db=str(database),
+        jitter=lambda: 1.0,
+        clock=lambda: float(FIXED_NOW) + 60,
+        lifespan=True,
+    )
+    assert len(resumed.requests) == 1
+    assert resumed_app.outbox.snapshot("idem-due")["state"] == "delivered"
+    resumed_app.close()
+
+
+def test_concurrent_pump_does_not_double_send(tmp_path: Path) -> None:
+    import asyncio
+
+    database = str(tmp_path / "state.sqlite")
+    capture = Capture(status=204)
+    harness = _harness(
+        capture,
+        state_db=database,
+        jitter=lambda: 1.0,
+        auto_pump=False,
+    )
+    harness.post(task_body(idempotency_key="idem-once"))
+    assert capture.requests == []
+
+    async def both() -> None:
+        await asyncio.gather(
+            harness.outbox.pump(harness.forwarder, float(FIXED_NOW), 1.0),
+            harness.outbox.pump(harness.forwarder, float(FIXED_NOW), 1.0),
+        )
+
+    asyncio.run(both())
+    assert len(capture.requests) == 1
+    harness.http.close()
+
+
 def test_state_db_file_mode_is_0600(tmp_path: Path) -> None:
     database = tmp_path / "state.sqlite"
     harness = _harness(Capture(), state_db=str(database))
