@@ -18,6 +18,7 @@ Pre-1.0, and bumped in a SemVer-like way.
 
 ## Unreleased
 
+- Section 2.1 now separates what the repository owner account can technically do from the actual scope of the credential Cue uses. Unverified credential scopes are marked unverified.
 - Added the abnormal-handling analysis and design document at `docs/ABNORMAL_HANDLING.md`. Items written as proposals are not implemented.
 - The agent setup docs (`docs/AI_SETUP.md`, `docs/AI_SETUP.en.md`) now state what HTTP `202` and `forwarded: true` mean. `202` means the bridge received and validated the request and recorded it in memory. It does not mean Grok received it, and it does not mean any task ran. `forwarded: true` means Grok delivery was scheduled as an `add_task` background task. It is not confirmation of a Grok 2xx response. The docs state that retries, an outbox, and persistent storage are not implemented.
 - The 2026-10-29 E2E is one successful request record. Grok-side receipt was confirmed separately by Norn (user) at 16:05 KST.
