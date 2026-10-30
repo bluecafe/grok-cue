@@ -220,7 +220,7 @@ CUE_SUMMARY_RETENTION_DAYS=30
 | `GROK_WEBHOOK_KEY_HEADER` | 아니오 | 앱 | 비우면 `Authorization: Bearer <GROK_WEBHOOK_KEY>`. 이름을 적으면 그 헤더의 값으로 키만 보냅니다 | 비움, 또는 `X-Grok-Key` |
 | `CUE_STATE_DB` | 아니오 | 앱 | 접수·서명 재생·아웃박스 SQLite 경로. 비우면 프로세스 메모리만 씁니다. 기본 경로는 없습니다 | 비움, 또는 `/var/lib/grok-cue/state.sqlite` |
 | `CUE_OUTBOX_POLL_SECONDS` | 아니오 | 앱 | 이 프로세스의 아웃박스 주기(초). 기본 5. 0 이하는 프로세스가 시작하지 않습니다. 시작 때도 한 번 pump합니다 | `5` |
-| `CUE_SUMMARY_RETENTION_DAYS` | 아니오 | 앱 | `delivered`와 `dead` 행의 `summary`를 지울 때까지의 날 수. 기본 30. 0 이하는 시작하지 않습니다. `queued`와 `sending`은 지우지 않습니다 | `30` |
+| `CUE_SUMMARY_RETENTION_DAYS` | 아니오 | 앱 | `delivered`와 `dead` 행의 `summary`를 지울 때까지의 날 수. 기본 30. 유한한 양수만 받습니다. `nan`, `inf`, 0, 음수는 시작할 때 거절합니다. `queued`와 `sending`은 지우지 않습니다 | `30` |
 | `PUBLIC_BASE_URL` | 확인 스크립트 | 문서 전용 | 확인 스크립트가 부르는 주소. 앱은 읽지 않습니다. 비어 있으면 스크립트가 멈춥니다 | `https://hook.example.com` |
 
 선택 항목은 비어 있으면 꺼진 것과 같습니다. `GROK_WEBHOOK_URL`과 `GROK_WEBHOOK_KEY`를 예시처럼 비워 두면, 파일을 복사해도 Grok으로 넘기지 않습니다. 주소는 코드에 기본값으로 들어 있지 않습니다.

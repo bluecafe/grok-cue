@@ -207,7 +207,7 @@ v2를 도입한 뒤의 전환은 아래와 같습니다.
 ```
 
 ### 6.4 요약 보관 [구현] (0.2.1)
-`CUE_SUMMARY_RETENTION_DAYS`(기본 30, 0 이하는 거절)가 지나면 `delivered` 또는 `dead`가 된 행의 아웃박스 `summary`를 지운다. 기간은 그 행이 `delivered` 또는 `dead`가 된 시각부터 센다. `queued`와 `sending`은 지우지 않는다. `retrying`도 끝낸 행이 아니라 지우지 않는다. 서명 재생 행은 요약 보관 기간이 아니라 서명 유효 시간(600초)이 지나면 삭제한다. Summary retention is [구현] / [implemented] (0.2.1): after `CUE_SUMMARY_RETENTION_DAYS` (default 30) the outbox `summary` is removed from rows that have been `delivered` or `dead` for that long. `queued` and `sending` rows are never changed. Replay rows are deleted once they are past the 600-second signature window.
+`CUE_SUMMARY_RETENTION_DAYS`(기본 30, 유한한 양수만. `nan`, `inf`, 0, 음수는 시작할 때 거절)가 지나면 `delivered` 또는 `dead`가 된 행의 아웃박스 `summary`를 지운다. 기간은 그 행이 `delivered` 또는 `dead`가 된 시각부터 센다. `queued`와 `sending`은 지우지 않는다. `retrying`도 끝낸 행이 아니라 지우지 않는다. 서명 재생 행은 요약 보관 기간이 아니라 서명 유효 시간(600초)이 지나면 삭제한다. Summary retention is [구현] / [implemented] (0.2.1): `CUE_SUMMARY_RETENTION_DAYS` must be a finite positive number (`nan`, `inf`, 0, and negative values are rejected at startup; default 30). After that many days the outbox `summary` is removed from rows that have been `delivered` or `dead` for that long. `queued` and `sending` rows are never changed. Replay rows are deleted once they are past the 600-second signature window.
 - 테스트: `test_delivered_summary_expires_only_after_the_retention_period`, `test_dead_summary_expires_after_the_retention_period`, `test_queued_and_sending_keep_summary`, `test_retrying_summary_is_kept`, `test_replay_rows_past_the_signature_window_are_deleted`, `test_memory_rows_follow_the_same_retention_rules`, `test_memory_replay_past_the_window_is_forgotten`
 
 ## 7. 재시도 정책 [구현]

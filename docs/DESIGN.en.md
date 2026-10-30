@@ -27,7 +27,7 @@ Without `GROK_WEBHOOK_KEY_HEADER` it sends `Authorization: Bearer <GROK_WEBHOOK_
 
 After the 0.2.0 deployment at 2026-10-30 23:00 KST, dummy requests with v1 and with no version header both returned `401` (`unknown_signature_version`) and nothing was queued in the outbox. A v2 dummy request returned `202`, was `delivered`, and stored `signature_version=2`. `healthz` returned `200`.
 
-`/docs`, `/redoc`, and `/openapi.json` return `404`. Every response includes `Content-Security-Policy: default-src 'none'; frame-ancestors 'none'`, and `X-Content-Type-Options: nosniff` when that header is not already set. After `CUE_SUMMARY_RETENTION_DAYS` (default 30), `summary` is removed from `delivered` and `dead` rows. `queued` and `sending` rows are kept. Replay rows are deleted once they are past the signature window (600 seconds).
+`/docs`, `/redoc`, and `/openapi.json` return `404`. Every response includes `Content-Security-Policy: default-src 'none'; frame-ancestors 'none'`, and `X-Content-Type-Options: nosniff` when that header is not already set. `CUE_SUMMARY_RETENTION_DAYS` must be a finite positive number (`nan`, `inf`, 0, and negative values are rejected at startup; default 30). After that many days, `summary` is removed from `delivered` and `dead` rows. `queued` and `sending` rows are kept. Replay rows are deleted once they are past the signature window (600 seconds).
 
 Unknown keys are rejected. There are no fields for `diff`, `patch`, `source`, file contents, or secrets. The body limit is 64 KiB (65536 bytes). It is checked before authentication; larger bodies get `400 invalid_request` with `fields` = `body`.
 

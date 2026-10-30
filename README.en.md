@@ -110,7 +110,7 @@ Restart the process after changes.
 | `GROK_WEBHOOK_KEY_HEADER` | no | Empty: `Authorization: Bearer <key>`. Set: send the bare key in this header |
 | `CUE_STATE_DB` | no | SQLite path for acceptance, replay, and the outbox. Empty: process memory only. No built-in path |
 | `CUE_OUTBOX_POLL_SECONDS` | no | Outbox poll interval in seconds for this process. Default 5. Values ≤ 0 are rejected. Also pumps once at startup |
-| `CUE_SUMMARY_RETENTION_DAYS` | no | Days before `summary` is removed from `delivered` and `dead` rows. Default 30. Values ≤ 0 are rejected. `queued` and `sending` rows are kept |
+| `CUE_SUMMARY_RETENTION_DAYS` | no | Days before `summary` is removed from `delivered` and `dead` rows. Default 30. Must be a finite positive number. `nan`, `inf`, 0, and negative values are rejected at startup. `queued` and `sending` rows are kept |
 
 `PUBLIC_BASE_URL` (for example `https://hook.example.com`) is read only by docs and check scripts; the app ignores it.
 

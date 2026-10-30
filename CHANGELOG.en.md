@@ -45,6 +45,8 @@ PATCH. Fixes from a security review.
 - A `reply_to` rejection returns only `{"error":"reply_to_not_allowed"}`. The allowlist is not included.
 - Every response sends `Content-Security-Policy: default-src 'none'; frame-ancestors 'none'`. `X-Content-Type-Options: nosniff` is added when it is not already set.
 - After `CUE_SUMMARY_RETENTION_DAYS` (default 30), `summary` is removed from `delivered` and `dead` rows. `queued` and `sending` rows are left as they are. Replay rows are deleted once they are past the signature window (600 seconds).
+- Backfilling `finished_at` on an older database uses `CAST(strftime('%s','now') AS INTEGER)` instead of `unixepoch()`, so it does not depend on the SQLite version.
+- `CUE_SUMMARY_RETENTION_DAYS` must be a finite positive number. `nan`, `inf`, 0, and negative values are rejected at startup.
 
 ## 0.2.0 — 2026-10-30
 
