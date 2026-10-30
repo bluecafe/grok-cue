@@ -47,6 +47,7 @@ PATCH. Fixes from a security review.
 - After `CUE_SUMMARY_RETENTION_DAYS` (default 30), `summary` is removed from `delivered` and `dead` rows. `queued` and `sending` rows are left as they are. Replay rows are deleted once they are past the signature window (600 seconds).
 - Backfilling `finished_at` on an older database uses `CAST(strftime('%s','now') AS INTEGER)` instead of `unixepoch()`, so it does not depend on the SQLite version.
 - `CUE_SUMMARY_RETENTION_DAYS` must be a finite positive number. `nan`, `inf`, 0, and negative values are rejected at startup.
+- Deployment check, 2026-10-30 23:53 KST: release `app-9875680`. Rollback target `app-5e34836`. Backup name `state.db.bak-5e34836`. `healthz` returned `200`. `/docs`, `/redoc`, and `/openapi.json` returned `404`. An unsigned POST returned `401`. The CSP header was `default-src 'none'; frame-ancestors 'none'`. v1 returned `401` (`unknown_signature_version`). v2 returned `202`, was `delivered`, and stored `signature_version=2`. Retention stayed at the default 30 days, with no environment change. Recorded in the Korean and English README, SETUP, AI_SETUP, DESIGN, and ABNORMAL_HANDLING.
 
 ## 0.2.0 — 2026-10-30
 

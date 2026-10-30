@@ -47,6 +47,7 @@ PATCH. 보안 점검에서 나온 수정입니다.
 - `CUE_SUMMARY_RETENTION_DAYS`(기본 30)가 지나면 `delivered`와 `dead` 행의 `summary`를 지웁니다. `queued`와 `sending`은 그대로 둡니다. 서명 재생 행은 서명 유효 시간(600초)이 지나면 삭제합니다.
 - 예전 데이터베이스에 `finished_at`을 채울 때 `unixepoch()` 대신 `CAST(strftime('%s','now') AS INTEGER)`를 씁니다. SQLite 버전에 기대지 않습니다.
 - `CUE_SUMMARY_RETENTION_DAYS`는 유한한 양수여야 합니다. `nan`, `inf`, 0, 음수는 시작할 때 거절합니다.
+- 배포 확인, 2026-10-30 23:53 KST: 릴리스 `app-9875680`. 롤백 대상 `app-5e34836`. 백업 이름 `state.db.bak-5e34836`. `healthz`는 `200`. `/docs`, `/redoc`, `/openapi.json`은 `404`. 서명 없는 POST는 `401`. CSP는 `default-src 'none'; frame-ancestors 'none'`. v1은 `401`(`unknown_signature_version`). v2는 `202`, `delivered`, `signature_version=2`. 보관 기간은 환경 변수를 바꾸지 않은 기본 30일. README, SETUP, AI_SETUP, DESIGN, ABNORMAL_HANDLING의 한국어와 영어에 적었습니다.
 
 ## 0.2.0 — 2026-10-30
 

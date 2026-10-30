@@ -254,7 +254,7 @@ Cue는 `POST https://hook.example.com/v1/cue/tasks`로 JSON을 보냅니다. 로
 ### Cue 쪽 설정
 
 > [!NOTE]
-> **2026-10-29 확인:** 그 환경이 서명된 JSON POST를 실제로 보냈고, HTTP `202`와 `status`=`received`, `executed`=`false`, `forwarded`=`true`를 받았습니다. 하류 수신은 16:05 KST에 노른(사용자)가 확인했습니다. 이 기록은 그 요청 한 건만 말합니다. 그 뒤 0.1.0 더미 실서버 확인은 6/6 통과입니다. Cue 실제 요청 1건이 접수되고 전달되었습니다. 2026-10-30 22:40 KST의 Cue 실제 요청 1건은 v2로 확인되었습니다(저널과 DB의 `signature_version=2`). 2026-10-30 23:00 KST에 0.2.0을 배포한 뒤 확인했습니다. v1과 버전 헤더가 없는 더미 요청은 둘 다 `401`(`unknown_signature_version`)이었고 아웃박스에는 쌓이지 않았습니다. v2 더미 요청은 `202`, `delivered`, `signature_version=2`였습니다. `healthz`는 `200`이었습니다. 지금의 `forwarded: true`는 Grok 2xx가 기록된 뒤에만입니다. 아래는 Cue의 화면이나 메뉴가 아니라, 보내는 쪽이 지켜야 하는 일반 요구 사항입니다.
+> **2026-10-29 확인:** 그 환경이 서명된 JSON POST를 실제로 보냈고, HTTP `202`와 `status`=`received`, `executed`=`false`, `forwarded`=`true`를 받았습니다. 하류 수신은 16:05 KST에 노른(사용자)가 확인했습니다. 이 기록은 그 요청 한 건만 말합니다. 그 뒤 0.1.0 더미 실서버 확인은 6/6 통과입니다. Cue 실제 요청 1건이 접수되고 전달되었습니다. 2026-10-30 22:40 KST의 Cue 실제 요청 1건은 v2로 확인되었습니다(저널과 DB의 `signature_version=2`). 2026-10-30 23:00 KST에 0.2.0을 배포한 뒤 확인했습니다. v1과 버전 헤더가 없는 더미 요청은 둘 다 `401`(`unknown_signature_version`)이었고 아웃박스에는 쌓이지 않았습니다. v2 더미 요청은 `202`, `delivered`, `signature_version=2`였습니다. `healthz`는 `200`이었습니다. 2026-10-30 23:53 KST에 0.2.1 릴리스 `app-9875680`을 배포했습니다. 롤백 대상은 `app-5e34836`이고, 백업 이름은 `state.db.bak-5e34836`입니다. `healthz`는 `200`이었습니다. `/docs`, `/redoc`, `/openapi.json`은 `404`였습니다. 서명 없는 POST는 `401`이었습니다. `Content-Security-Policy`는 `default-src 'none'; frame-ancestors 'none'`이었습니다. v1은 `401`(`unknown_signature_version`)이었습니다. v2는 `202`, `delivered`, `signature_version=2`였습니다. 보관 기간은 환경 변수를 바꾸지 않은 기본 30일입니다. 지금의 `forwarded: true`는 Grok 2xx가 기록된 뒤에만입니다. 아래는 Cue의 화면이나 메뉴가 아니라, 보내는 쪽이 지켜야 하는 일반 요구 사항입니다.
 
 Cue 쪽 흐름:
 

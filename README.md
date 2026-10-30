@@ -42,6 +42,8 @@ grok-cue는 두 AI 비서 서비스 사이에 놓이는 작은 "접수 창구" �
 
 2026-10-30 23:00 KST에 0.2.0을 배포한 뒤 확인했습니다. v1과 버전 헤더가 없는 더미 요청은 둘 다 `401`(`unknown_signature_version`)이었고 아웃박스에는 쌓이지 않았습니다. v2 더미 요청은 `202`, `delivered`, `signature_version=2`였습니다. `healthz`는 `200`이었습니다. 2026-10-30 22:40 KST의 Cue 실제 요청 1건은 v2로 확인되었습니다(저널과 DB의 `signature_version=2`).
 
+2026-10-30 23:53 KST에 0.2.1 릴리스 `app-9875680`을 배포했습니다. 롤백 대상은 `app-5e34836`이고, 백업 이름은 `state.db.bak-5e34836`입니다. `healthz`는 `200`이었습니다. `/docs`, `/redoc`, `/openapi.json`은 `404`였습니다. 서명 없는 POST는 `401`이었습니다. `Content-Security-Policy`는 `default-src 'none'; frame-ancestors 'none'`이었습니다. v1은 `401`(`unknown_signature_version`)이었습니다. v2는 `202`, `delivered`, `signature_version=2`였습니다. 보관 기간은 환경 변수를 바꾸지 않은 기본 30일입니다.
+
 ## 설치
 
 설치 전에 아래가 준비되어 있어야 합니다. 오른쪽 명령으로 확인합니다.
