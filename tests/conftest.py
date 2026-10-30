@@ -8,6 +8,8 @@ os.environ.setdefault("REPLY_TO_DEFAULT", "cue@example.com")
 
 from collections.abc import Callable, Iterator
 
+import asyncio
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -40,6 +42,15 @@ class Harness:
         self.notifier = notifier
         self.settings = settings
         self.now = now
+        self.outbox = None
+        self.forwarder = None
+        self._entered = False
+
+    def close(self) -> None:
+        if self._entered:
+            self.http.__exit__(None, None, None)
+        else:
+            self.http.close()
 
     def post(
         self,
@@ -66,6 +77,9 @@ class Harness:
             headers.pop(name, None)
         return self.http.post("/v1/cue/tasks", content=body, headers=headers)
 
+    def pump(self, at: float, jitter: float = 1.0) -> None:
+        asyncio.run(self.outbox.pump(self.forwarder, at, jitter))
+
 
 def build_harness(
     *,
@@ -79,6 +93,11 @@ def build_harness(
     state_db: str | None = None,
     forwarder: GrokForwarder | None = None,
     now: float = FIXED_NOW,
+    jitter=None,
+    auto_pump: bool = True,
+    clock: Callable[[], float] | None = None,
+    poll_seconds: float = 5.0,
+    lifespan: bool = False,
 ) -> Harness:
     settings = Settings(
         cue_bridge_token=TOKEN,
@@ -91,15 +110,25 @@ def build_harness(
         grok_webhook_key=grok_webhook_key,
         grok_webhook_key_header=grok_webhook_key_header,
         cue_state_db=state_db,
+        cue_outbox_poll_seconds=poll_seconds,
     )
     notifier = RecordingNotifier()
     app = create_app(
         settings,
-        clock=lambda: now,
+        clock=clock or (lambda: now),
         notifier=notifier,
         forwarder=forwarder,
+        jitter=jitter,
+        auto_pump=auto_pump,
     )
-    return Harness(TestClient(app), notifier, settings, now)
+    http = TestClient(app)
+    built = Harness(http, notifier, settings, now)
+    built.outbox = app.state.bridge.outbox
+    built.forwarder = app.state.bridge.forwarder
+    if lifespan:
+        http.__enter__()
+        built._entered = True
+    return built
 
 
 @pytest.fixture

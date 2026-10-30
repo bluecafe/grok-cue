@@ -56,6 +56,12 @@ def _harness(
     key: str | None = GROK_KEY,
     header: str | None = None,
     timeout: float = FORWARD_TIMEOUT_SECONDS,
+    state_db: str | None = None,
+    jitter=None,
+    auto_pump: bool = True,
+    clock=None,
+    poll_seconds: float = 5.0,
+    lifespan: bool = False,
 ) -> Harness:
     settings_kwargs = {
         "grok_webhook_url": url,
@@ -70,7 +76,16 @@ def _harness(
         timeout=timeout,
         transport=capture.transport(),
     )
-    return build_harness(**settings_kwargs, forwarder=forwarder)
+    return build_harness(
+        **settings_kwargs,
+        forwarder=forwarder,
+        state_db=state_db,
+        jitter=jitter,
+        auto_pump=auto_pump,
+        clock=clock,
+        poll_seconds=poll_seconds,
+        lifespan=lifespan,
+    )
 
 
 def test_forward_timeout_constant_is_five_seconds() -> None:
@@ -86,7 +101,13 @@ def test_successful_forward_is_scheduled_and_not_execution() -> None:
     assert body["handoff_id"] == HANDOFF_ID
     assert body["status"] == "received"
     assert body["executed"] is False
-    assert body["forwarded"] is True
+    assert body["forwarded"] is False
+    assert body["forward_state"] == "queued"
+    assert len(capture.requests) == 1
+    follow = harness.post(task_body(), timestamp=int(harness.now) + 1)
+    assert follow.status_code == 202
+    assert follow.json()["forwarded"] is True
+    assert follow.json()["forward_state"] == "delivered"
     assert len(capture.requests) == 1
 
 
@@ -102,6 +123,7 @@ def test_unset_url_or_key_skips_forward() -> None:
         response = harness.post(task_body())
         assert response.status_code == 202
         assert response.json()["forwarded"] is False
+        assert response.json()["forward_state"] == "disabled"
         assert response.json()["executed"] is False
         assert capture.requests == []
 
@@ -112,7 +134,9 @@ def test_receiver_http_error_keeps_202(caplog: pytest.LogCaptureFixture) -> None
     harness = _harness(capture)
     response = harness.post(task_body(summary="SUMMARY_NOT_FOR_GROK_LOG"))
     assert response.status_code == 202
-    assert response.json()["forwarded"] is True
+    assert response.json()["forwarded"] is False
+    assert response.json()["forward_state"] == "queued"
+    assert harness.outbox.snapshot(response.json()["handoff_id"] and "idem-1")["state"] == "retrying"
     assert response.json()["executed"] is False
     assert len(capture.requests) == 1
     assert "outcome=http status=500" in caplog.text
@@ -126,7 +150,9 @@ def test_receiver_timeout_keeps_202(caplog: pytest.LogCaptureFixture) -> None:
     harness = _harness(capture, timeout=0.05)
     response = harness.post(task_body())
     assert response.status_code == 202
-    assert response.json()["forwarded"] is True
+    assert response.json()["forwarded"] is False
+    assert response.json()["forward_state"] == "queued"
+    assert harness.outbox.snapshot("idem-1")["state"] == "retrying"
     assert response.json()["executed"] is False
     assert capture.requests == []
     assert "outcome=timeout" in caplog.text
@@ -141,8 +167,9 @@ def test_duplicate_body_does_not_forward_again() -> None:
     second = harness.post(body, timestamp=int(harness.now) + 1)
     assert first.status_code == 202
     assert second.status_code == 202
-    assert first.json()["forwarded"] is True
-    assert second.json()["forwarded"] is False
+    assert first.json()["forwarded"] is False
+    assert second.json()["forwarded"] is True
+    assert second.json()["forward_state"] == "delivered"
     assert second.json()["executed"] is False
     assert second.json()["handoff_id"] == first.json()["handoff_id"]
     assert len(capture.requests) == 1
@@ -218,7 +245,7 @@ def test_forward_outcome_classification(caplog: pytest.LogCaptureFixture) -> Non
             )
         )
         assert response.status_code == 202
-        assert response.json()["forwarded"] is True
+        assert response.json()["forwarded"] is False
         assert f"outcome=http status={status} class={outcome_class}" in caplog.text
         harness.http.close()
 

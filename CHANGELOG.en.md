@@ -2,7 +2,7 @@
 
 # Changelog
 
-The current version is `0.0.3`. The value lives only in [`VERSION`](VERSION) at the repository root. The app does not read that file, and no response, including `/healthz`, includes the version.
+The current version is `0.0.4`. The value lives only in [`VERSION`](VERSION) at the repository root. The app does not read that file, and no response, including `/healthz`, includes the version.
 
 ## Version rules
 
@@ -25,6 +25,16 @@ Pre-1.0, and bumped in a SemVer-like way.
 - The 2026-10-29 E2E is one successful request record. Grok-side receipt was confirmed separately by Norn (user) at 16:05 KST.
 - In docs and READMEs the owner is 노른(사용자) in Korean and Norn (user) in English. There was no existing personal-name wording to replace.
 - Versioning was added only in `VERSION`, this changelog, and one README line. Application code was not changed, and no tag was created.
+
+## 0.0.4 — 2026-10-30
+
+PATCH. `0.1.0` is reserved for P8 and P13. The first `202` now has `forwarded: false` until a Grok 2xx. Retries are at most 7 attempts including the first, inside 60 minutes from the first attempt. Any other 4xx is `dead` immediately.
+
+### Features
+
+- The outbox and `forward_state` share the SQLite file used for acceptance and replay. The file mode is `0600`. If the database cannot be opened, the log is `state_db=unavailable` with no path and no body, and the response is `503`.
+- `forwarded: true` only after a Grok 2xx. Sending the same body again does not start another delivery. Only timeouts, connection errors, 408, 425, 429, and 5xx are retried.
+- Retries and restart recovery run on an in-process worker. It pumps once at startup, then every `CUE_OUTBOX_POLL_SECONDS` (default 5) using the wall clock, and it is cancelled on shutdown. If one pump raises, the worker keeps going and the log records only the exception class name. Rows left in `sending` and rows that are due are recovered before they are sent. A row is claimed atomically before send so the same row is not sent twice.
 
 ## 0.0.3 — 2026-10-30
 

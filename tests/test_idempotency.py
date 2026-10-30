@@ -17,6 +17,7 @@ def test_same_key_and_body_returns_original_without_renotify(harness: Harness) -
         "status": "received",
         "executed": False,
         "forwarded": False,
+        "forward_state": "disabled",
     }
     assert second.json() == first.json()
     assert second.headers["cache-control"] == "no-store"

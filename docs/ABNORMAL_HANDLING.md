@@ -54,7 +54,7 @@ Cue는 새 작업 메일을 받으면 ① 명세와 GitHub 참조를 확인하�
 |---|---|---|
 | Grok 측 | handoff 메일 작성, `handoff_id` 발급, GitHub 참조와 명세 전달 | Cue 산출물 대신 작성 |
 | Cue | 메일 확인 → 참조 확인(4절) → 불일치면 추측 없이 `needs_input` → 명시된 저장소·브랜치·경로 안에서만 작업 → 서명 POST 1건 | Grok 코드, 메일 루틴, Bridge 수신기, 시크릿, 인프라 수정 |
-| Bridge | 서명 검증, 접수, 8필드 전달 [현행 구현]. 상태 기록 [제안·미구현] | 작업 실행, 메일 발송, 머지·배포·결제 |
+| Bridge | 서명 검증, 접수, 8필드 전달 [현행 구현]. 상태 기록 [구현] | 작업 실행, 메일 발송, 머지·배포·결제 |
 | 사용자(owner) | 승인 권한. 재개·종료, 키 교체 | — |
 
 인계·`202`·`forwarded`·`completed`는 머지·배포·결제 승인이 아닙니다 [결정]. 응답은 항상 `executed: false`입니다 [현행 구현] (`main.py`, `test_successful_forward_is_scheduled_and_not_execution`).
@@ -158,16 +158,16 @@ v2 같은 비호환 변경은 아래 절차를 거치기 전에는 현행 계약
 4. v1 거절은 별도 PR, 다시 BREAKING 표기
 - 테스트(제안): `test_v1_v2_overlap_window`, `test_unknown_signature_version_401`
 
-## 6. 접수·전달 의미와 아웃박스 [결정 + 제안·미구현]
+## 6. 접수·전달 의미와 아웃박스 [구현]
 
 ### 6.1 정의
 - `202` = 접수 행과 replay 행을 한 트랜잭션으로 커밋한 뒤 202 [구현]. 저장 실패면 `503 storage_unavailable`
-- 아웃박스 행을 그 트랜잭션에 넣는 것은 P3 [제안·미구현]
+- 아웃박스 행도 그 트랜잭션에 넣습니다 [구현] (0.0.4, P3)
 - `CUE_STATE_DB`가 비어 있으면 접수·replay 기록은 프로세스 메모리만 쓰고, 재시작하면 사라집니다.
-- `forwarded: true` = 그 아웃박스 행이 Grok 2xx를 받았을 때만 [결정, 제안·미구현]
+- `forwarded: true` = 그 아웃박스 행이 Grok 2xx를 받았을 때만 [구현]. `forwarded: false`는 전달 대기이며, 같은 요청을 다시 보내도 명세 밖의 재전송은 하지 않습니다.
 - 보장 범위: **최소 1회, 중복 가능**. Grok 수신 측의 영속 중복 제거(`idempotency_key`)가 검증되기 전에는 "중복 없는 1회 전달"을 약속하지 않습니다 [미검증 전제]
 
-### 6.2 `forward_state` [제안·미구현]
+### 6.2 `forward_state` [구현]
 | 값 | 뜻 | `forwarded` |
 |---|---|---|
 | `disabled` | 웹훅 설정 없음 | false |
@@ -177,7 +177,7 @@ v2 같은 비호환 변경은 아래 절차를 거치기 전에는 현행 계약
 | `delivered` | 2xx 확인 | true |
 | `dead` | 시도 한도 소진 또는 재시도 불가 오류 | false |
 
-### 6.3 중복 요청 응답 [제안·미구현, 선택안 고정]
+### 6.3 중복 요청 응답 [구현]
 **선택: 최초 202 바디를 그대로 재생하고, 현재 아웃박스 상태를 읽기 전용으로 덧붙입니다.** 같은 요청은 어떤 상태에서도 전달을 새로 일으키지 않습니다.
 
 | 경우 | 응답 | 재전달 |
@@ -190,9 +190,7 @@ v2 같은 비호환 변경은 아래 절차를 거치기 전에는 현행 계약
 | 같은 서명 재사용 | `401` | 저장 없음 [현행 구현] |
 | 저장소 오류 | `503 storage_unavailable` | 저장 없음 |
 
-현행과 다른 점: 현재는 같은 키 재전송에 `forwarded:false`만 주고 `forward_state`가 없습니다 [현행 구현].
-
-예시 [제안·미구현]
+예시 [구현]
 ```json
 {"handoff_id":"0f6c2d1e-0000-4000-8000-000000000001","status":"received","executed":false,"forwarded":false,"forward_state":"queued"}
 ```
@@ -201,7 +199,7 @@ v2 같은 비호환 변경은 아래 절차를 거치기 전에는 현행 계약
 {"handoff_id":"0f6c2d1e-0000-4000-8000-000000000001","status":"received","executed":false,"forwarded":true,"forward_state":"delivered"}
 ```
 
-## 7. 재시도 정책 [제안·미구현, 수치는 결정(2026-10-30)]
+## 7. 재시도 정책 [구현]
 
 ### 7.1 Bridge → Grok
 - 시도 횟수: **첫 시도를 포함해 최대 7회**(첫 시도 + 재시도 6회), 총 60분 [결정]
@@ -211,12 +209,12 @@ v2 같은 비호환 변경은 아래 절차를 거치기 전에는 현행 계약
 - 시도당 5초 타임아웃 [현행 구현 상수 `FORWARD_TIMEOUT_SECONDS`]
 - 재시도 대상: 타임아웃, 연결 오류, 408, 425, 429, 5xx. 타임아웃 재시도는 중복을 만들 수 있음
 - 재시도 불가: 그 밖의 4xx → 즉시 `dead`
-- 재시작: `queued`/`sending`/`retrying` 행을 다시 큐에 넣고, DB에 저장된 시도 수와 첫 시도 시각을 이어서 씀
+- 재시작: `sending` 행은 다시 `queued`로 두고, 기한이 된 `queued`/`retrying` 행과 함께 시작 시 한 번 pump합니다. 시도 수와 첫 시도 시각은 이어서 씁니다. 그 뒤에도 프로세스 안 워커가 `CUE_OUTBOX_POLL_SECONDS`(기본 5초)마다 실제 시각으로 pump합니다. 단일 프로세스 전제입니다. 행을 보내기 전에 원자적으로 `sending`으로 잡아서 같은 행을 두 번 보내지 않습니다. [구현]
 
-### 7.2 수동 재전달과 이력
-- `dead` 행만 수동 도구로 다시 `queued`가 됩니다.
-- 기존 시도 이력은 지우지 않습니다. 새 `run`(1부터 증가)을 만들고 그 run 안에서 다시 최대 7회·60분을 셉니다.
-- 이력 행: `(idempotency_key, run, try_no, started_at, outcome, http_status)`. 추가만 하고 수정하지 않습니다.
+### 7.2 수동 재전달 [미구현]과 시도 이력 [구현]
+- `dead` 행만 수동 도구로 다시 `queued`가 됩니다. [미구현]
+- 기존 시도 이력은 지우지 않습니다. 수동 재전달의 새 `run`은 [미구현]입니다.
+- 이력 행: `(idempotency_key, run, try_no, started_at, outcome, http_status)`. 자동 재시도는 추가만 하고 수정하지 않습니다. [구현]
 
 ### 7.3 Cue → Bridge [미검증 전제, Cue 측 수치는 Cue 확인 대기]
 - 같은 바디 바이트·같은 키로만, 매번 새 타임스탬프로 재서명
@@ -478,7 +476,7 @@ stateDiagram-v2
 | P0 | 문서. PR #2에 이미 있음: `forwarded`를 "전달 예약"으로 정정, `AI_SETUP.md`의 "접수되고 전달되었다" 정정, `VERSION` 0.0.1, `CHANGELOG.md`, `CHANGELOG.en.md`. 이 설계 문서 추가는 이 파일입니다. | 문서 리뷰, `test_spec.py` 통과 |
 | P1 | 전달 결과 분류, 인증 실패 사유 로그 | `test_forward_outcome_classification`, `test_auth_reason_log_has_no_secret` |
 | P2 | SQLite 접수·replay, 202 전 커밋, 실패 503 | `test_replay_rejected_after_restart`, `test_same_key_after_restart_returns_stored`, `test_replay_store_unavailable_fails_closed` |
-| P3 | 아웃박스·`forward_state`·재시도·dead | `test_forwarded_true_only_after_2xx`, `test_first_202_is_queued`, `test_replay_returns_original_body_with_state`, `test_replay_never_reforwards_queued_delivered_dead`, `test_seven_attempts_including_first_then_dead`, `test_retry_after_overrides_backoff_capped`, `test_sixty_minute_budget_from_first_attempt`, `test_4xx_is_dead_immediately`, `test_sending_row_resent_after_restart` |
+| P3 | 아웃박스·`forward_state`·재시도·dead [구현] (0.0.4) | `test_forwarded_true_only_after_2xx`, `test_first_202_is_queued`, `test_replay_returns_original_body_with_state`, `test_replay_never_reforwards_queued_delivered_dead`, `test_seven_attempts_including_first_then_dead`, `test_retry_after_overrides_backoff_capped`, `test_sixty_minute_budget_from_first_attempt`, `test_4xx_is_dead_immediately`, `test_sending_row_resent_after_restart` |
 | P4 | `redeliver.py`·`outbox_status.py` | `test_redeliver_dry_run_sends_nothing`, `test_redeliver_send_only_with_flag`, `test_redeliver_appends_run_keeps_history`, `test_alert_payload_has_no_secret_source_or_diff` |
 | P5 | 사용자(owner) 이메일 알림(8.1) | 가짜 수신처 dead 1건 → 알림 1건 |
 | P6 | 상태 계약(9절) | `test_transition_table_matches_doc`, `test_terminal_states_never_change`, `test_cancel_report_moves_to_cancelled`, 10.2 테스트들 |
@@ -525,7 +523,7 @@ P3은 응답 의미를 바꾸므로(첫 202가 `forwarded:false`) Grok·Cue 공�
 추가 확정(사용자(owner), 2026-10-30 17:39–17:40 KST) [결정, 모두 미구현]
 11. T2(`needs_input` 응답 기한) = 24시간, 지나면 `expired`(T10)
 12. `redeliver.py`는 운영자(operator)가 운영. 기본 dry-run, 실제 전송은 매번 사용자(owner) 승인 후(8.3)
-13. 재생 기록은 SQLite에 영속 저장, 재시작 후에도 유지(5.2). 아웃박스 도입 시 같은 DB
+13. 재생 기록은 SQLite에 영속 저장, 재시작 후에도 유지(5.2). 아웃박스도 같은 DB [구현]
 
 ### 13.2 남은 결정 (책임자별)
 **사용자(owner)**
