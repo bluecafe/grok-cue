@@ -227,6 +227,8 @@ sudo systemctl status grok-cue.service
 
 Success: `systemctl is-active grok-cue.service` prints `active`.
 
+Run one process only. Do not add `uvicorn --workers`, and do not start a second service instance. With `ProtectSystem=strict`, the `ReadWritePaths=/var/lib/grok-cue` drop-in in [SETUP.en.md](SETUP.en.md) is required. If the database directory is not writable, the server returns `503 storage_unavailable`.
+
 ### 3.5 HTTPS
 
 After approval, add this to the Caddyfile. The host name is the user's value.

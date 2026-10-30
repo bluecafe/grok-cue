@@ -77,8 +77,8 @@ class Harness:
             headers.pop(name, None)
         return self.http.post("/v1/cue/tasks", content=body, headers=headers)
 
-    def pump(self, at: float, jitter: float = 1.0) -> None:
-        asyncio.run(self.outbox.pump(self.forwarder, at, jitter))
+    def pump(self, at: float, jitter: float = 1.0, clock: Callable[[], float] | None = None) -> None:
+        asyncio.run(self.outbox.pump(self.forwarder, at, jitter, clock=clock))
 
 
 def build_harness(

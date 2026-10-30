@@ -6,6 +6,7 @@ import asyncio
 import logging
 import random
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from app.forward import AttemptResult, GrokForwarder
@@ -135,13 +136,16 @@ class MemoryOutbox:
         forwarder: GrokForwarder,
         now: float,
         jitter: float | None = None,
+        *,
+        clock: Callable[[], float] | None = None,
     ) -> None:
         async with self._pump_lock:
             self.recover_sending()
             factor = jitter_factor() if jitter is None else jitter
             for job in self.claim_due(now):
                 result = await forwarder.attempt(job.payload)
-                self.finish(job, result, now, factor)
+                finished_at = now if clock is None else clock()
+                self.finish(job, result, finished_at, factor)
 
 
 async def run_outbox_worker(bridge: object, stop: asyncio.Event) -> None:
@@ -156,6 +160,7 @@ async def run_outbox_worker(bridge: object, stop: asyncio.Event) -> None:
                 bridge.forwarder,  # type: ignore[attr-defined]
                 bridge.clock(),  # type: ignore[attr-defined]
                 bridge.jitter(),  # type: ignore[attr-defined]
+                clock=bridge.clock,  # type: ignore[attr-defined]
             )
         except asyncio.CancelledError:
             raise

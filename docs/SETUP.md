@@ -139,6 +139,24 @@ sudo systemctl status grok-cue.service
 
 설정을 바꾼 뒤에는 `sudo systemctl restart grok-cue.service`로 다시 읽힙니다.
 
+프로세스는 하나만 띄웁니다. `uvicorn --workers`나 서비스 인스턴스를 여러 개 두지 않습니다. 아웃박스 워커는 프로세스 안에 하나뿐입니다.
+
+`ProtectSystem=strict`를 쓰면 DB 디렉터리는 읽기 전용으로 막힙니다. 예시 경로 `/var/lib/grok-cue`만 쓰려면 드롭인을 `/etc/systemd/system/grok-cue.service.d/state-db.conf`에 둡니다. 이 블록도 문서 예시입니다.
+
+```ini
+[Service]
+ProtectSystem=strict
+ReadWritePaths=/var/lib/grok-cue
+```
+
+```bash
+sudo mkdir -p /var/lib/grok-cue
+sudo chown bridge:bridge /var/lib/grok-cue
+sudo chmod 700 /var/lib/grok-cue
+```
+
+`.env`의 `CUE_STATE_DB` 예시는 `/var/lib/grok-cue/state.sqlite`입니다. 이 디렉터리를 쓸 수 없으면 서버는 `503 storage_unavailable`를 돌려줍니다.
+
 ## 3. HTTPS 역방향 프록시
 
 Caddy가 `https://hook.example.com`을 받아 `127.0.0.1:8160`으로 넘기는 예시입니다. 이 블록도 문서 안의 예시입니다. 서버의 Caddyfile에 넣습니다.

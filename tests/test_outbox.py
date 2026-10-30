@@ -318,6 +318,32 @@ def test_worker_delivers_on_the_cycle_after_pump_raises(
     harness.close()
 
 
+def test_finish_uses_time_after_the_attempt(tmp_path: Path) -> None:
+    database = str(tmp_path / "state.sqlite")
+    clock = {"now": float(FIXED_NOW)}
+    capture = Capture(status=503)
+    harness = _harness(
+        capture,
+        state_db=database,
+        jitter=lambda: 1.0,
+        auto_pump=False,
+        clock=lambda: clock["now"],
+    )
+    original = harness.forwarder.attempt
+
+    async def attempt(payload):
+        clock["now"] = float(FIXED_NOW) + 5
+        return await original(payload)
+
+    harness.forwarder.attempt = attempt
+    harness.post(task_body(idempotency_key="idem-finish-time"))
+    harness.pump(float(FIXED_NOW), clock=lambda: clock["now"])
+    snap = harness.outbox.snapshot("idem-finish-time")
+    assert snap is not None
+    assert snap["next_attempt_at"] == float(FIXED_NOW) + 5 + 60
+    harness.http.close()
+
+
 def test_concurrent_pump_does_not_double_send(tmp_path: Path) -> None:
     import asyncio
 
