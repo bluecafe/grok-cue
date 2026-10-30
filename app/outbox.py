@@ -14,6 +14,7 @@ from app.forward import AttemptResult, GrokForwarder
 logger = logging.getLogger("grok_cue")
 
 MAX_ATTEMPTS = 7
+DEFAULT_SUMMARY_RETENTION_SECONDS = 30 * 86400
 BUDGET_SECONDS = 60 * 60
 RETRY_AFTER_CAP_SECONDS = 30 * 60
 # Gaps after attempts 1..6. Attempt 7 is the last try.
@@ -41,6 +42,14 @@ class OutboxJob:
     run: int = 1
 
 
+def drop_summary(payload: dict) -> bool:
+    """Remove a stored summary. Return True when the text was present."""
+    if "summary" not in payload:
+        return False
+    del payload["summary"]
+    return True
+
+
 def over_budget(first_attempt_at: float | None, now: float) -> bool:
     if first_attempt_at is None:
         return False
@@ -54,6 +63,7 @@ class MemoryOutbox:
         self._lock = threading.Lock()
         self._pump_lock = asyncio.Lock()
         self._rows: dict[str, dict] = {}
+        self.summary_retention_seconds = float(DEFAULT_SUMMARY_RETENTION_SECONDS)
 
     def enqueue(
         self,
@@ -75,6 +85,7 @@ class MemoryOutbox:
                 "first_attempt_at": None,
                 "next_attempt_at": now if enabled else None,
                 "run": 1,
+                "finished_at": None,
             }
         return state
 
@@ -91,6 +102,16 @@ class MemoryOutbox:
             row = self._rows.get(key)
             return None if row is None else dict(row)
 
+    def stored_payload(self, key: str) -> dict | None:
+        with self._lock:
+            row = self._rows.get(key)
+        if row is None:
+            return None
+        payload = row.get("payload")
+        if not isinstance(payload, dict):
+            return None
+        return dict(payload)
+
     def claim_due(self, now: float) -> list[OutboxJob]:
         jobs: list[OutboxJob] = []
         with self._lock:
@@ -103,6 +124,7 @@ class MemoryOutbox:
                 if over_budget(row["first_attempt_at"], now) or int(row["attempts"]) >= MAX_ATTEMPTS:
                     row["state"] = "dead"
                     row["next_attempt_at"] = None
+                    row["finished_at"] = now
                     continue
                 if row["first_attempt_at"] is None:
                     row["first_attempt_at"] = now
@@ -127,9 +149,25 @@ class MemoryOutbox:
             row["state"] = state
             if state == "retrying":
                 row["next_attempt_at"] = now + delay_seconds(attempts, result.retry_after, jitter)
+                row["finished_at"] = None
             else:
                 row["next_attempt_at"] = None
+                row["finished_at"] = now
             return state
+
+    def apply_retention(self, now: float) -> None:
+        """Clear summaries on finished rows and leave queued or sending rows alone."""
+        cutoff = now - float(self.summary_retention_seconds)
+        with self._lock:
+            for row in self._rows.values():
+                if row["state"] not in {"delivered", "dead"}:
+                    continue
+                finished = row.get("finished_at")
+                if finished is None or float(finished) > cutoff:
+                    continue
+                payload = row.get("payload")
+                if isinstance(payload, dict):
+                    drop_summary(payload)
 
     async def pump(
         self,
@@ -141,6 +179,7 @@ class MemoryOutbox:
     ) -> None:
         async with self._pump_lock:
             self.recover_sending()
+            self.apply_retention(now)
             factor = jitter_factor() if jitter is None else jitter
             for job in self.claim_due(now):
                 result = await forwarder.attempt(job.payload)
@@ -156,9 +195,16 @@ async def run_outbox_worker(bridge: object, stop: asyncio.Event) -> None:
         recover()
     while not stop.is_set():
         try:
-            await bridge.outbox.pump(  # type: ignore[attr-defined]
+            now = bridge.clock()  # type: ignore[attr-defined]
+            replay = getattr(bridge, "replay", None)
+            outbox = bridge.outbox  # type: ignore[attr-defined]
+            if replay is not None and replay is not outbox:
+                prune = getattr(replay, "prune", None)
+                if prune is not None:
+                    prune(now)
+            await outbox.pump(
                 bridge.forwarder,  # type: ignore[attr-defined]
-                bridge.clock(),  # type: ignore[attr-defined]
+                now,
                 bridge.jitter(),  # type: ignore[attr-defined]
                 clock=bridge.clock,  # type: ignore[attr-defined]
             )

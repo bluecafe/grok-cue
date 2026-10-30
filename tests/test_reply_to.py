@@ -32,11 +32,10 @@ def test_allowlisted_address_is_case_insensitive(harness: Harness) -> None:
 def test_reply_to_outside_allowlist_is_rejected(harness: Harness) -> None:
     response = harness.post(task_body(reply_to="other@example.com"))
     assert response.status_code == 400
-    assert response.json() == {
-        "error": "reply_to_not_allowed",
-        "allowed": ["cue@example.com"],
-    }
+    assert response.json() == {"error": "reply_to_not_allowed"}
+    assert "allowed" not in response.json()
     assert "other@example.com" not in response.text
+    assert "cue@example.com" not in response.text
     assert harness.notifier.events == []
 
 
@@ -72,9 +71,11 @@ def test_empty_allowlist_rejects_every_reply_to(harness_factory) -> None:
         timestamp=int(harness.now) + 1,
     )
     assert omitted.status_code == 400
-    assert omitted.json() == {"error": "reply_to_not_allowed", "allowed": []}
+    assert omitted.json() == {"error": "reply_to_not_allowed"}
     assert explicit.status_code == 400
-    assert explicit.json()["allowed"] == []
+    assert explicit.json() == {"error": "reply_to_not_allowed"}
+    assert "cue@example.com" not in omitted.text
+    assert "cue@example.com" not in explicit.text
     assert harness.notifier.events == []
 
 
@@ -86,7 +87,7 @@ def test_default_must_be_on_a_custom_allowlist(harness_factory) -> None:
         timestamp=int(harness.now) + 1,
     )
     assert omitted.status_code == 400
-    assert omitted.json()["error"] == "reply_to_not_allowed"
-    assert omitted.json()["allowed"] == ["ops@example.com"]
+    assert omitted.json() == {"error": "reply_to_not_allowed"}
+    assert "ops@example.com" not in omitted.text
     assert allowed.status_code == 202
     assert harness.notifier.events[0][2] == "ops@example.com"

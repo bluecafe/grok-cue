@@ -29,6 +29,8 @@ class Settings(BaseSettings):
     cue_state_db: str | None = None
     # Seconds between outbox polls in this process. The worker also pumps once at startup.
     cue_outbox_poll_seconds: float = 5.0
+    # Days to keep `summary` on delivered or dead outbox rows. Queued and sending rows stay.
+    cue_summary_retention_days: float = 30.0
 
     @field_validator("cue_bridge_token", "cue_bridge_hmac_key")
     @classmethod
@@ -42,6 +44,20 @@ class Settings(BaseSettings):
     def poll_is_positive(cls, value: float) -> float:
         if value <= 0:
             raise ValueError("CUE_OUTBOX_POLL_SECONDS")
+        return value
+
+    @field_validator("cue_summary_retention_days", mode="before")
+    @classmethod
+    def blank_retention(cls, value: object) -> object:
+        if isinstance(value, str) and not value.strip():
+            return 30.0
+        return value
+
+    @field_validator("cue_summary_retention_days")
+    @classmethod
+    def retention_is_positive(cls, value: float) -> float:
+        if value <= 0:
+            raise ValueError("CUE_SUMMARY_RETENTION_DAYS")
         return value
 
     @field_validator(
@@ -107,6 +123,9 @@ class Settings(BaseSettings):
 
     def forwarding_enabled(self) -> bool:
         return bool(self.grok_webhook_url and self.grok_webhook_key)
+
+    def summary_retention_seconds(self) -> float:
+        return self.cue_summary_retention_days * 86400
 
     def secret_values(self) -> list[str]:
         values = [self.cue_bridge_token, self.cue_bridge_hmac_key]

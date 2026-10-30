@@ -2,7 +2,7 @@
 
 # 변경 기록
 
-현재 버전은 `0.2.0`입니다. 값은 저장소 루트의 [`VERSION`](VERSION)에 둡니다. 앱은 이 파일을 FastAPI `version` 필드에만 읽습니다. `/healthz`를 포함한 응답 본문에는 버전을 넣지 않습니다.
+현재 버전은 `0.2.1`입니다. 값은 저장소 루트의 [`VERSION`](VERSION)에 둡니다. 앱은 이 파일을 FastAPI `version` 필드에만 읽습니다. `/healthz`를 포함한 응답 본문에는 버전을 넣지 않습니다.
 
 ## 버전 규칙
 
@@ -36,6 +36,15 @@
 - 2026-10-29 E2E는 성공한 요청 기록 한 건입니다. Grok 쪽 수신은 노른(사용자)가 16:05 KST에 따로 확인했습니다.
 - 문서와 README에서 소유자는 한국어로 노른(사용자), 영어로 Norn (user)입니다. 실명으로 바꿀 기존 표기는 없었습니다.
 - 버전 관리를 `VERSION`, 이 기록, README의 한 줄에만 추가했습니다. 앱 코드는 바꾸지 않았고, 태그는 만들지 않았습니다.
+
+## 0.2.1 — 2026-10-30
+
+PATCH. 보안 점검에서 나온 수정입니다.
+
+- `/docs`, `/redoc`, `/openapi.json`은 `404`입니다. FastAPI 문서 화면을 열지 않습니다.
+- `reply_to` 거절 응답은 `{"error":"reply_to_not_allowed"}`만 돌려줍니다. 허용 메일 목록은 넣지 않습니다.
+- 모든 응답에 `Content-Security-Policy: default-src 'none'; frame-ancestors 'none'`을 붙입니다. `X-Content-Type-Options: nosniff`가 없으면 붙입니다.
+- `CUE_SUMMARY_RETENTION_DAYS`(기본 30)가 지나면 `delivered`와 `dead` 행의 `summary`를 지웁니다. `queued`와 `sending`은 그대로 둡니다. 서명 재생 행은 서명 유효 시간(600초)이 지나면 삭제합니다.
 
 ## 0.2.0 — 2026-10-30
 

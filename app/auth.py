@@ -106,6 +106,11 @@ class ReplayCache:
             self._seen[signature] = timestamp
             return False
 
+    def prune(self, now: float) -> None:
+        """Drop signatures that are past the replay window."""
+        with self._lock:
+            self._prune(now)
+
     def _prune(self, now: float) -> None:
         cutoff = int(now) - REPLAY_TTL_SECONDS
         stale = [signature for signature, ts in self._seen.items() if ts < cutoff]

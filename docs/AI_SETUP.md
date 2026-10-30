@@ -4,7 +4,7 @@
 
 이 문서는 Grok 또는 Cue 같은 에이전트가 혼자 읽고 Bridge 설치를 수행하기 위한 절차다. 사람이 읽는 같은 순서는 [SETUP.md](SETUP.md)다. 주소, 메일, 경로, 키는 예시만 적는다. 사용자의 실제 값을 받기 전에는 예시를 그대로 실행하지 않는다.
 
-환경값은 .env 한 곳입니다. 앱이 읽는 이름은 `app/settings.py`의 열한 개입니다. `PUBLIC_BASE_URL`은 문서와 확인 스크립트만 읽고, 앱은 읽지 않습니다. 응답 코드와 헤더 이름은 [README.md](../README.md), 본문 필드는 [DESIGN.md](DESIGN.md)와 같습니다.
+환경값은 .env 한 곳입니다. 앱이 읽는 이름은 `app/settings.py`의 열두 개입니다. `PUBLIC_BASE_URL`은 문서와 확인 스크립트만 읽고, 앱은 읽지 않습니다. 응답 코드와 헤더 이름은 [README.md](../README.md), 본문 필드는 [DESIGN.md](DESIGN.md)와 같습니다. `/docs`, `/redoc`, `/openapi.json`은 `404`입니다.
 
 ## 0. 사용자에게 받을 입력
 
@@ -162,7 +162,7 @@ openssl rand -hex 32
 python3 -c 'import secrets; print(secrets.token_hex(32))'
 ```
 
-토큰과 HMAC 키는 서로 다른 값이다. 환경값은 .env 한 곳입니다. `.env`는 따옴표 없이 아래 이름만 둔다. 앱이 읽는 열한 개와 문서 전용 `PUBLIC_BASE_URL`이다.
+토큰과 HMAC 키는 서로 다른 값이다. 환경값은 .env 한 곳입니다. `.env`는 따옴표 없이 아래 이름만 둔다. 앱이 읽는 열두 개와 문서 전용 `PUBLIC_BASE_URL`이다.
 
 ```dotenv
 CUE_BRIDGE_TOKEN=replace-with-bearer-token
@@ -177,6 +177,7 @@ GROK_WEBHOOK_KEY_HEADER=
 PUBLIC_BASE_URL=https://hook.example.com
 CUE_STATE_DB=
 CUE_OUTBOX_POLL_SECONDS=5
+CUE_SUMMARY_RETENTION_DAYS=30
 ```
 
 | 변수 | 필요 | 읽는 곳 | 의미 | 예시 |
@@ -192,6 +193,7 @@ CUE_OUTBOX_POLL_SECONDS=5
 | `GROK_WEBHOOK_KEY_HEADER` | 아니오 | 앱 | 비우면 `Authorization: Bearer <GROK_WEBHOOK_KEY>`. 이름을 적으면 그 헤더의 값으로 키만 보냅니다 | 비움, 또는 `X-Grok-Key` |
 | `CUE_STATE_DB` | 아니오 | 앱 | 접수·서명 재생·아웃박스 SQLite 경로. 비우면 프로세스 메모리만 씁니다 | 비움, 또는 `/var/lib/grok-cue/state.sqlite` |
 | `CUE_OUTBOX_POLL_SECONDS` | 아니오 | 앱 | 아웃박스 주기(초). 기본 5. 0 이하는 시작하지 않습니다 | `5` |
+| `CUE_SUMMARY_RETENTION_DAYS` | 아니오 | 앱 | `delivered`와 `dead` 행의 `summary`를 지울 때까지의 날 수. 기본 30. 0 이하는 시작하지 않습니다. `queued`와 `sending`은 지우지 않습니다 | `30` |
 | `PUBLIC_BASE_URL` | 확인 스크립트 | 문서 전용 | 확인 스크립트가 부르는 주소. 앱은 읽지 않습니다. 비어 있으면 스크립트가 멈춥니다 | `https://hook.example.com` |
 
 `replace-with-`는 자리표시자다. 서버에서 만든 값으로 바꾼다. `REPLY_TO_*`는 사용자가 준 주소로 바꾼다. `PUBLIC_BASE_URL`은 사용자가 준 공개 주소다. 로컬만 볼 때는 `http://127.0.0.1:8160`으로 둔다. Grok URL과 키는 사용자가 전달을 승인하기 전에는 비워 둔다.
@@ -298,7 +300,7 @@ sudo -u bridge .venv/bin/python scripts/check_bridge.py --send     # 전달을 �
 | 로컬 `/healthz`는 `200`인데 도메인은 실패 | Caddy 이름, `reverse_proxy 127.0.0.1:8160`, 80/443, 인증서 순으로 본다. 8160을 공개하는 쪽으로 우회하지 않는다 |
 | 인증서 오류 | DNS가 이 서버를 가리키는지 다시 `dig`한다. Caddy가 실행 중인지 확인한다 |
 | 서명 POST가 `401` | 시계가 300초 안인지, Bearer와 HMAC를 둘 다 넣었는지, `sha256=`을 빼었는지, 같은 서명을 재사용하지 않았는지 본다. 키 값은 출력하지 않는다 |
-| `400` `reply_to_not_allowed` | 허용 목록이 비었거나 주소가 목록 밖이거나 기본 주소가 목록에 없다. `.env`를 고치고 프로세스를 재시작한다 |
+| `400` `reply_to_not_allowed` | 허용 목록이 비었거나 주소가 목록 밖이거나 기본 주소가 목록에 없다. 응답은 사유 코드뿐이고 허용 목록은 넣지 않는다. `.env`를 고치고 프로세스를 재시작한다 |
 | `400` `invalid_request` | `fields`의 이름을 [DESIGN.md](DESIGN.md)와 맞춘다. 본문은 64 KiB 이하, `Content-Type`은 `application/json`이다 |
 | `400` `task_id_not_allowed` | `task_id` 키를 제거하고 `handoff_id`만 남긴다 |
 | `409` | 처음 보낸 바이트를 그대로 다시 보낸다. 키 순서가 바뀐 JSON은 다른 본문이다 |

@@ -49,6 +49,14 @@ def read_version() -> str:
 
 MAX_BODY_BYTES = 64 * 1024
 _NO_STORE = {"Cache-Control": "no-store"}
+_CONTENT_SECURITY_POLICY = "default-src 'none'; frame-ancestors 'none'"
+
+
+def apply_security_headers(response: Response) -> None:
+    """Set the page policy on every response. Leave an existing nosniff value in place."""
+    response.headers["Content-Security-Policy"] = _CONTENT_SECURITY_POLICY
+    if "x-content-type-options" not in response.headers:
+        response.headers["X-Content-Type-Options"] = "nosniff"
 
 
 @dataclass
@@ -172,8 +180,25 @@ def create_app(
         jitter=jitter or jitter_factor,
     )
     state.auto_pump = auto_pump
-    app = FastAPI(title="grok-cue", version=read_version(), debug=False, lifespan=_outbox_lifespan)
+    if durable is not None:
+        durable.summary_retention_seconds = resolved.summary_retention_seconds()
+    memory_outbox.summary_retention_seconds = resolved.summary_retention_seconds()
+    app = FastAPI(
+        title="grok-cue",
+        version=read_version(),
+        debug=False,
+        lifespan=_outbox_lifespan,
+        docs_url=None,
+        redoc_url=None,
+        openapi_url=None,
+    )
     app.state.bridge = state
+
+    @app.middleware("http")
+    async def add_security_headers(request: Request, call_next):
+        response = await call_next(request)
+        apply_security_headers(response)
+        return response
 
     @app.get("/healthz")
     def healthz() -> Response:
@@ -295,7 +320,7 @@ def create_app(
                 logger.info("rejected error=reply_to_not_allowed")
                 if (blocked := spend_replay()) is not None:
                     return blocked
-                return json_error(400, "reply_to_not_allowed", allowed=recipients)
+                return json_error(400, "reply_to_not_allowed")
 
         try:
             model = CueTaskRequest.model_validate(data)
@@ -310,7 +335,7 @@ def create_app(
             logger.info("rejected error=reply_to_not_allowed")
             if (blocked := spend_replay()) is not None:
                 return blocked
-            return json_error(400, "reply_to_not_allowed", allowed=recipients)
+            return json_error(400, "reply_to_not_allowed")
 
         response_body: dict[str, object] = {
             "handoff_id": str(model.handoff_id),

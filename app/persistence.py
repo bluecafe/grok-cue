@@ -18,10 +18,12 @@ from collections.abc import Callable
 from app.auth import REPLAY_TTL_SECONDS
 from app.forward import AttemptResult, GrokForwarder
 from app.outbox import (
+    DEFAULT_SUMMARY_RETENTION_SECONDS,
     MAX_ATTEMPTS,
     OutboxJob,
     _next_state,
     delay_seconds,
+    drop_summary,
     jitter_factor,
     over_budget,
 )
@@ -50,6 +52,7 @@ class StateDB:
         self._lock = threading.Lock()
         self._pump_lock = asyncio.Lock()
         self._conn: sqlite3.Connection | None = None
+        self.summary_retention_seconds = float(DEFAULT_SUMMARY_RETENTION_SECONDS)
         try:
             fd = os.open(path, os.O_CREAT | os.O_RDWR, 0o600)
             os.close(fd)
@@ -131,6 +134,7 @@ class StateDB:
                 """
             )
             self._add_signature_version_column(conn)
+            self._add_finished_at_column(conn)
             self._conn = conn
             self._restrict(path)
         except (OSError, sqlite3.Error):
@@ -345,10 +349,10 @@ class StateDB:
                         conn.execute(
                             """
                             UPDATE outbox
-                            SET state = 'dead', next_attempt_at = NULL
+                            SET state = 'dead', next_attempt_at = NULL, finished_at = ?
                             WHERE idempotency_key = ?
                             """,
-                            (key,),
+                            (now, key),
                         )
                         continue
                     started = now if first_at is None else float(first_at)
@@ -385,8 +389,11 @@ class StateDB:
         first = float(job.first_attempt_at if job.first_attempt_at is not None else now)
         state = _next_state(attempts, first, now, result, jitter)
         next_at = None
+        finished_at = None
         if state == "retrying":
             next_at = now + delay_seconds(attempts, result.retry_after, jitter)
+        else:
+            finished_at = now
         with self._lock:
             conn = self._require()
             try:
@@ -394,10 +401,11 @@ class StateDB:
                 conn.execute(
                     """
                     UPDATE outbox
-                    SET state = ?, attempts = ?, next_attempt_at = ?
+                    SET state = ?, attempts = ?, next_attempt_at = ?,
+                        finished_at = CASE WHEN ? IS NULL THEN finished_at ELSE ? END
                     WHERE idempotency_key = ?
                     """,
-                    (state, attempts, next_at, job.idempotency_key),
+                    (state, attempts, next_at, finished_at, finished_at, job.idempotency_key),
                 )
                 conn.execute(
                     """
@@ -442,6 +450,7 @@ class StateDB:
     ) -> None:
         async with self._pump_lock:
             self.recover_sending()
+            self.apply_retention(now)
             factor = jitter_factor() if jitter is None else jitter
             for job in self.claim_due(now):
                 result = await forwarder.attempt(job.payload)
@@ -468,6 +477,89 @@ class StateDB:
             """,
             (key, handoff_id, body, state, now if forwarding else None),
         )
+
+    def stored_payload(self, key: str) -> dict | None:
+        with self._lock:
+            conn = self._require()
+            row = conn.execute(
+                "SELECT payload_json FROM outbox WHERE idempotency_key = ?",
+                (key,),
+            ).fetchone()
+        if row is None:
+            return None
+        payload = json.loads(row[0])
+        if not isinstance(payload, dict):
+            return None
+        return payload
+
+    def replay_count(self) -> int:
+        with self._lock:
+            conn = self._require()
+            row = conn.execute("SELECT COUNT(*) FROM replay").fetchone()
+        if row is None:
+            return 0
+        return int(row[0])
+
+    def apply_retention(self, now: float) -> None:
+        """Clear summaries on finished rows and drop replay rows past the window.
+
+        Queued and sending rows are not updated. Replay cleanup uses the
+        signature validity window, not the summary retention period.
+        """
+        cutoff = now - float(self.summary_retention_seconds)
+        with self._lock:
+            conn = self._require()
+            try:
+                self._begin(conn)
+                self._prune(conn, now)
+                rows = conn.execute(
+                    """
+                    SELECT idempotency_key, payload_json
+                    FROM outbox
+                    WHERE state IN ('delivered', 'dead')
+                      AND finished_at IS NOT NULL
+                      AND finished_at <= ?
+                    """,
+                    (cutoff,),
+                ).fetchall()
+                for key, payload_json in rows:
+                    payload = json.loads(payload_json)
+                    if not isinstance(payload, dict) or not drop_summary(payload):
+                        continue
+                    conn.execute(
+                        """
+                        UPDATE outbox
+                        SET payload_json = ?
+                        WHERE idempotency_key = ? AND state IN ('delivered', 'dead')
+                        """,
+                        (
+                            json.dumps(payload, separators=(",", ":"), sort_keys=True),
+                            key,
+                        ),
+                    )
+                self._commit(conn)
+            except (sqlite3.Error, json.JSONDecodeError):
+                self._safe_rollback(conn)
+                raise StorageUnavailable from None
+
+    def _add_finished_at_column(self, conn: sqlite3.Connection) -> None:
+        """Record when a row became delivered or dead. Older rows use the first attempt."""
+        self._begin(conn)
+        try:
+            names = {str(row[1]) for row in conn.execute("PRAGMA table_info(outbox)").fetchall()}
+            if "finished_at" not in names:
+                conn.execute("ALTER TABLE outbox ADD COLUMN finished_at REAL")
+                conn.execute(
+                    """
+                    UPDATE outbox
+                    SET finished_at = COALESCE(first_attempt_at, unixepoch())
+                    WHERE state IN ('delivered', 'dead') AND finished_at IS NULL
+                    """
+                )
+            self._commit(conn)
+        except sqlite3.Error:
+            self._safe_rollback(conn)
+            raise
 
     def _add_signature_version_column(self, conn: sqlite3.Connection) -> None:
         """Add the nullable acceptance column once. Existing rows stay NULL."""
